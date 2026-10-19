@@ -1,0 +1,38 @@
+// Project settings, committed to Git. Shared by the whole team.
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // Loaded into EVERY session. Keep these files short.
+  "instructions": [
+    "docs/architecture/ESSENTIALS.md",
+    "docs/architecture/GLOSSARY.md",
+    "docs/architecture/INDEX.md"
+  ],
+
+  // Default model for this project. Agents in .opencode/agents can use another.
+  "model": "local/<GLM_ID>",
+
+  // What the AI may do without asking.
+  // For each command the LAST matching line wins, so "*" comes first.
+  // Do NOT add "edit" here: it would also apply to the Plan agent.
+  "permission": {
+    "webfetch": "deny",
+    "websearch": "deny",
+    "bash": {
+      "*": "allow",
+      "git push*": "ask",
+      "git reset*": "ask",
+      "git clean*": "ask",
+      "git checkout -- *": "ask",
+      "Remove-Item*": "ask",
+      "rm *": "ask",
+      "del *": "ask"
+    }
+  },
+
+  // Summarise older parts of a long conversation when the window fills up.
+  "compaction": {
+    "auto": true,
+    "prune": true
+  }
+}

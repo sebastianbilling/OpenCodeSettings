@@ -1,0 +1,39 @@
+// Copy to: C:\Users\<you>\.config\opencode\opencode.jsonc
+// Personal settings for this machine. Applies to every project. NOT in Git.
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // Offline housekeeping
+  "autoupdate": false,            // never download updates (only works in this personal file)
+  "share": "disabled",            // never create share links for conversations
+  "enabled_providers": ["local"], // only your own servers; hides built-in online providers
+
+  // Your model servers
+  "provider": {
+    "local": {
+      "npm": "@ai-sdk/openai-compatible", // built into OpenCode, nothing to download
+      "name": "Local AI servers",
+      "options": {
+        "baseURL": "<LLM_URL>",
+        "apiKey": "{env:LLM_API_KEY}",     // read from the environment variable
+        "timeout": 600000                  // 10 minutes; long answers on big contexts take time
+      },
+      "models": {
+        "<GLM_ID>": {
+          "name": "GLM 5.3 Flash",
+          "tool_call": true,
+          "limit": { "context": 262144, "output": 32768 }
+        },
+        "<MINIMAX_ID>": {
+          "name": "MiniMax 2.5",
+          "tool_call": true,
+          "limit": { "context": 262144, "output": 32768 }
+        }
+      }
+    }
+  },
+
+  // Defaults
+  "model": "local/<GLM_ID>",      // main model when nothing else is chosen
+  "small_model": "local/<GLM_ID>" // for small jobs like naming sessions
+}
