@@ -12,3 +12,10 @@ $env:Path -split ';' | Select-String ripgrep
 $vs = Split-Path (Split-Path (Get-Command code).Source)
 $rg = Get-ChildItem $vs -Recurse -Filter rg.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
 $rg
+
+$env:Path += ";$env:USERPROFILE\tools\ripgrep"
+rg --version
+
+$dir = "$env:USERPROFILE\tools\ripgrep"
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($userPath -notlike "*$dir*") { [Environment]::SetEnvironmentVariable("Path", "$userPath;$dir", "User") }
