@@ -56,3 +56,7 @@ Step 5. Prove it works the way a new window will see it (your own shell still ha
 
 Step 6. Report in a few lines: where rg.exe came from, where it is now, whether the PATH changed, and the output of step 5.
 Then tell me to: close every terminal program completely (Windows Terminal, and the terminals inside VS Code and IntelliJ), quit OpenCode Desktop, sign out of Windows and back in, and then run "rg --version" and "opencode debug rg search class" in a new PowerShell window.
+
+
+
+node -e "const fs=require('fs'); for (const f of fs.readdirSync('generated/deps').filter(x=>x.endsWith('.json'))) { const d=JSON.parse(fs.readFileSync('generated/deps/'+f,'utf8')); for (const b of (d.builds||[])) if (b.error) console.log(d.repo+' | '+(b.dir||'(top)')+' | '+b.error.split(/\r?\n/).slice(-4).join(' / ')) }"
