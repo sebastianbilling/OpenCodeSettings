@@ -19,3 +19,40 @@ rg --version
 $dir = "$env:USERPROFILE\tools\ripgrep"
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($userPath -notlike "*$dir*") { [Environment]::SetEnvironmentVariable("Path", "$userPath;$dir", "User") }
+
+
+Fix ripgrep (rg.exe) on this Windows machine so that rg works in new PowerShell windows and OpenCode can use it.
+This machine has no internet: never try to download anything. Use PowerShell syntax only (no &&, no bash commands).
+Run one step at a time and show me each command's output. Change nothing except what is described here.
+Never use setx, and never change the system (Machine) PATH.
+
+Goal: rg.exe copied to "$env:USERPROFILE\tools\ripgrep\rg.exe", and that folder on my user PATH.
+
+Step 1. Check the current state:
+  Test-Path "$env:USERPROFILE\tools\ripgrep\rg.exe"
+  [Environment]::GetEnvironmentVariable("Path", "User")
+If rg.exe already exists there, skip to step 3.
+
+Step 2. Find the rg.exe that ships with VS Code. Try these in order; stop at the first that prints a path ending in \rg.exe:
+  a) $vs = Split-Path (Split-Path (Get-Command code -ErrorAction SilentlyContinue).Source); Get-ChildItem $vs -Recurse -Filter rg.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+  b) Get-ChildItem "$env:LOCALAPPDATA\Programs", "$env:ProgramFiles", "${env:ProgramFiles(x86)}" -Recurse -Filter rg.exe -ErrorAction SilentlyContinue | Select-Object -First 5 -ExpandProperty FullName
+If several are found, prefer one inside a "Microsoft VS Code" folder. If none is found, stop and tell me.
+Then copy it:
+  New-Item -ItemType Directory -Force "$env:USERPROFILE\tools\ripgrep" | Out-Null
+  Copy-Item "<the path you found>" "$env:USERPROFILE\tools\ripgrep\rg.exe"
+
+Step 3. Check that the copy runs:
+  & "$env:USERPROFILE\tools\ripgrep\rg.exe" --version
+If it is blocked by a policy, do not use the copy: in step 4, set $dir to the folder of the original rg.exe from step 2 instead, and tell me you did.
+
+Step 4. Add the folder to my user PATH if it is not there yet, keeping everything already in it:
+  $dir = "$env:USERPROFILE\tools\ripgrep"
+  $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+  $new = if ($userPath) { "$userPath;$dir" } else { $dir }
+  if ($userPath -notlike "*$dir*") { [Environment]::SetEnvironmentVariable("Path", $new, "User") }
+
+Step 5. Prove it works the way a new window will see it (your own shell still has the old PATH):
+  $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User"); rg --version
+
+Step 6. Report in a few lines: where rg.exe came from, where it is now, whether the PATH changed, and the output of step 5.
+Then tell me to: close every terminal program completely (Windows Terminal, and the terminals inside VS Code and IntelliJ), quit OpenCode Desktop, sign out of Windows and back in, and then run "rg --version" and "opencode debug rg search class" in a new PowerShell window.
