@@ -1,0 +1,13 @@
+# The backend repos are cloned here but belong to their own Git repositories.
+/repos/
+
+# Output of tools/refresh.mjs. Rebuilt on every machine, never committed.
+/generated/
+
+# Personal working notes.
+.opencode/handoff.md
+
+# OpenCode may try to install a helper package here (fails offline, harmless).
+.opencode/node_modules/
+.opencode/package.json
+.opencode/bun.lock

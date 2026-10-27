@@ -1,0 +1,59 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // Loaded into EVERY session (AGENTS.md is loaded automatically). Keep them short.
+  "instructions": [
+    "context/REPOS.md",
+    "context/CONVENTIONS.md",
+    "context/GLOSSARY.md"
+  ],
+
+  // Main model for this workspace. Agents in .opencode/agents can use another one.
+  // The name refers to your personal config (C:\Users\<you>\.config\opencode\opencode.jsonc).
+  "model": "local/<BUILD_MODEL_ID>",
+
+  // The Java language server cannot be downloaded on an offline machine. This stops OpenCode trying.
+  "lsp": false,
+
+  // What the AI may do without asking.
+  // Within each list the LAST matching line wins, so "*" comes first.
+  "permission": {
+    "webfetch": "deny",
+    "websearch": "deny",
+    "bash": {
+      "*": "allow",
+      "git commit*": "ask",
+      "git -C * commit*": "ask",
+      "git push*": "ask",
+      "git -C * push*": "ask",
+      "git reset*": "ask",
+      "git -C * reset*": "ask",
+      "git clean*": "ask",
+      "git -C * clean*": "ask",
+      "git checkout*": "ask",
+      "git -C * checkout*": "ask",
+      "git switch*": "ask",
+      "git -C * switch*": "ask",
+      "git rebase*": "ask",
+      "git -C * rebase*": "ask",
+      "git merge*": "ask",
+      "git -C * merge*": "ask",
+      "git stash*": "ask",
+      "git -C * stash*": "ask",
+      "Remove-Item*": "ask",
+      "rm *": "ask",
+      "del *": "ask",
+      "rmdir *": "ask",
+      "node tools/refresh.mjs*": "ask",
+      "node tools/clone-all.mjs*": "ask",
+      "node tools/map-all.mjs*": "ask",
+      "node tools/sync-cards.mjs*": "ask"
+    }
+  },
+
+  // Summarise older parts of a long conversation when the window fills up.
+  "compaction": {
+    "auto": true,
+    "prune": true
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "comment": "The repos to clone into repos/. url = what you would pass to git clone. branch is optional (default: the remote's default branch). Run node tools/clone-all.mjs --write-list to fill this from repos you already moved into repos/.",
+  "repos": [
+    { "name": "example-core-lib", "url": "https://git.example.local/backend/example-core-lib.git" },
+    { "name": "example-order-service", "url": "https://git.example.local/backend/example-order-service.git", "branch": "develop" }
+  ]
+}

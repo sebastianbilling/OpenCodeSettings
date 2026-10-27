@@ -2,3 +2,8 @@ $rg = Get-ChildItem "$env:LOCALAPPDATA\Programs\Microsoft VS Code", "$env:Progra
 $rg        # should print a path ending in \rg.exe
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.cache\opencode\bin" | Out-Null
 Copy-Item $rg "$env:USERPROFILE\.cache\opencode\bin\rg.exe"
+
+
+Test-Path "$env:USERPROFILE\tools\ripgrep\rg.exe"
+[Environment]::GetEnvironmentVariable("Path", "User")
+$env:Path -split ';' | Select-String ripgrep

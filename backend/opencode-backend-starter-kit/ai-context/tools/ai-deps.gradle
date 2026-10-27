@@ -1,0 +1,119 @@
+// ai-deps.gradle - writes down what each project in a Gradle build is and what it depends on.
+//
+// It only reads the build configuration. It runs no tasks, changes no files in the repo
+// and resolves nothing (it lists DECLARED dependencies, exactly as the build files say).
+// tools/refresh.mjs runs it like this, in each repo folder:
+//
+//     gradlew -q -I <ai-context>/tools/ai-deps.gradle -PaiDepsOut=<file.json> help
+//
+// Written to work with old and new Gradle versions (roughly 4.x up to 9.x).
+
+import groovy.json.JsonOutput
+
+gradle.projectsEvaluated { g ->
+    if (g.parent != null) return                      // skip buildSrc and included builds
+    def root = g.rootProject
+    def out = root.hasProperty('aiDepsOut') ? root.property('aiDepsOut') : null
+    if (!out) return
+
+    def projects = []
+    root.allprojects.each { p ->
+        def info = [
+            path        : p.path,
+            name        : p.name,
+            group       : String.valueOf(p.group ?: ''),
+            version     : String.valueOf(p.version ?: ''),
+            dir         : root.projectDir.toPath().relativize(p.projectDir.toPath()).toString().replace('\\', '/'),
+            javaVersion : '',
+            archivesName: '',
+            plugins     : [],
+            publications: [],
+            dependencies: []
+        ]
+
+        // Java language level: toolchain first, then sourceCompatibility.
+        try {
+            def java = p.extensions.findByName('java')
+            if (java != null) {
+                try {
+                    def lv = java.toolchain.languageVersion
+                    if (lv.isPresent()) info.javaVersion = lv.get().toString()
+                } catch (ignored) { }
+                if (!info.javaVersion) {
+                    try { info.javaVersion = String.valueOf(java.sourceCompatibility) } catch (ignored) { }
+                }
+            }
+        } catch (ignored) { }
+        if (!info.javaVersion) {
+            try { if (p.hasProperty('sourceCompatibility')) info.javaVersion = String.valueOf(p.property('sourceCompatibility')) } catch (ignored) { }
+        }
+
+        // Jar base name (old builds publish under this name).
+        try {
+            def base = p.extensions.findByName('base')
+            if (base != null && base.hasProperty('archivesName')) info.archivesName = String.valueOf(base.archivesName.get())
+        } catch (ignored) { }
+        if (!info.archivesName) {
+            try { if (p.hasProperty('archivesBaseName')) info.archivesName = String.valueOf(p.property('archivesBaseName')) } catch (ignored) { }
+        }
+
+        // Applied plugins, by class name (e.g. JavaLibraryPlugin, SpringBootPlugin).
+        try {
+            p.plugins.each { pl ->
+                def n = pl.getClass().name.replaceAll(/_Decorated$/, '')
+                if (!n.contains('.internal.') && !info.plugins.contains(n)) info.plugins << n
+            }
+        } catch (ignored) { }
+
+        // What this project publishes (maven-publish).
+        try {
+            def publishing = p.extensions.findByName('publishing')
+            if (publishing != null) {
+                publishing.publications.each { pub ->
+                    try {
+                        info.publications << [group: String.valueOf(pub.groupId), artifact: String.valueOf(pub.artifactId), version: String.valueOf(pub.version)]
+                    } catch (ignored) { }
+                }
+            }
+        } catch (ignored) { }
+
+        // Declared dependencies, per configuration.
+        p.configurations.each { c ->
+            try {
+                c.dependencies.each { d ->
+                    def e = [configuration: c.name]
+                    if (d instanceof org.gradle.api.artifacts.ProjectDependency) {
+                        e.type = 'project'
+                        try { e.path = d.path } catch (ignored) {
+                            try { e.path = d.dependencyProject.path } catch (ignored2) { e.path = String.valueOf(d.name) }
+                        }
+                    } else if (d instanceof org.gradle.api.artifacts.FileCollectionDependency) {
+                        e.type = 'files'
+                        try {
+                            e.files = d.files.files.collect { f ->
+                                try { root.projectDir.toPath().relativize(f.toPath()).toString().replace('\\', '/') } catch (ignored) { f.path }
+                            }
+                        } catch (ignored) { e.files = [] }
+                    } else {
+                        e.type = 'module'
+                        e.group = String.valueOf(d.group ?: '')
+                        e.name = String.valueOf(d.name)
+                        e.version = String.valueOf(d.version ?: '')
+                    }
+                    info.dependencies << e
+                }
+            } catch (ignored) { }
+        }
+        projects << info
+    }
+
+    def result = [
+        gradleVersion : g.gradleVersion,
+        rootProject   : root.name,
+        includedBuilds: g.includedBuilds.collect { it.name },
+        projects      : projects
+    ]
+    def f = new File(out.toString())
+    f.parentFile?.mkdirs()
+    f.setText(JsonOutput.prettyPrint(JsonOutput.toJson(result)), 'UTF-8')
+}
