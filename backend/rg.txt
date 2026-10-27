@@ -1,0 +1,4 @@
+$rg = Get-ChildItem "$env:LOCALAPPDATA\Programs\Microsoft VS Code", "$env:ProgramFiles\Microsoft VS Code" -Recurse -Filter rg.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+$rg        # should print a path ending in \rg.exe
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.cache\opencode\bin" | Out-Null
+Copy-Item $rg "$env:USERPROFILE\.cache\opencode\bin\rg.exe"
