@@ -47,26 +47,46 @@ export function writeFacts(repo, g) {
   else L.push('- No Java index for this repo yet (run tools/refresh.mjs).');
   if (s?.parseErrorFiles) L.push(`- ${s.parseErrorFiles} files have syntax the parser did not fully understand.`);
   const projects = d.projects || [];
-  const modules = projects.filter(p => p.path !== ':').map(p => p.path);
-  const howRead = d.source === 'gradle' ? `asked Gradle ${d.gradleVersion}` : d.source === 'static' ? 'read the build files as text (Gradle could not run here)' : d.source === 'maven-static' ? 'read pom.xml' : 'no build found';
-  L.push(`- Build: ${d.source === 'maven-static' ? 'Maven' : d.source === 'none' ? 'none found' : 'Gradle'}${d.gradleVersion ? ' ' + d.gradleVersion : ''}${d.wrapper ? ' (wrapper in repo)' : ''}; facts below: ${howRead}`);
-  if (modules.length) L.push(`- Modules (${modules.length}): ${modules.slice(0, 30).join(', ')}${modules.length > 30 ? ', ...' : ''}`);
+  const modules = projects.filter(p => p.path !== ':').map(p => (p.build ? `${p.build} ${p.path}` : p.path));
+  const builds = d.builds?.length ? d.builds
+    : (['maven-static', 'none'].includes(d.source) ? [] : [{ dir: '', source: d.source, gradleVersion: d.gradleVersion, wrapperDir: d.wrapper ? '' : null }]);
+  const win = p => p.replace(/\//g, '\\');
+  const testCmd = b => {
+    const where = b.dir ? `repos\\${repo}\\${win(b.dir)}` : `repos\\${repo}`;
+    if (b.wrapperDir === null || b.wrapperDir === undefined) return { runIn: where, cmd: 'gradle' };
+    if (b.wrapperDir === b.dir) return { runIn: where, cmd: '.\\gradlew.bat' };
+    const wdir = b.wrapperDir ? `repos\\${repo}\\${win(b.wrapperDir)}` : `repos\\${repo}`;
+    return { runIn: wdir, cmd: `.\\gradlew.bat -p ${win(path.posix.relative(b.wrapperDir, b.dir))}` };
+  };
+  const how = b => (b.source === 'gradle' ? `asked Gradle ${b.gradleVersion || ''}`.trim() : `read the build files as text${b.error ? ' (Gradle could not run here)' : ''}`);
+  if (d.source === 'maven-static') L.push('- Build: Maven; facts below: read pom.xml');
+  else if (!builds.length) L.push('- Build: no Gradle or Maven build found');
+  else if (builds.length === 1) {
+    const b = builds[0], t = testCmd(b);
+    L.push(`- Build: Gradle${b.gradleVersion ? ' ' + b.gradleVersion : ''}${b.wrapperDir !== null && b.wrapperDir !== undefined ? ' (wrapper in repo)' : ''}${b.dir ? ` in ${b.dir}/` : ''}; facts below: ${how(b)}`);
+    if (modules.length) L.push(`- Modules (${modules.length}): ${modules.slice(0, 30).join(', ')}${modules.length > 30 ? ', ...' : ''}`);
+    L.push(`- Likely test command, run in ${t.runIn} (PowerShell): \`${t.cmd} test\``);
+    L.push(`- One test class: \`${t.cmd} ${modules.length ? ':<module>:' : ''}test --tests "<package.ClassName>"\``);
+  } else {
+    L.push(`- Gradle builds: ${builds.length} separate builds in this repo, each in its own folder with its own test command:`);
+    for (const b of builds) {
+      const t = testCmd(b);
+      const mods = projects.filter(p => p.build === b.dir && p.path !== ':').map(p => p.path);
+      L.push(`    - ${b.dir || '(repo root)'}: ${how(b)}.${mods.length ? ` Modules (${mods.length}): ${mods.slice(0, 15).join(', ')}${mods.length > 15 ? ', ...' : ''}.` : ''} Tests: run in ${t.runIn}: \`${t.cmd} test\``);
+    }
+    L.push('- One test class: add `--tests "<package.ClassName>"` to the test command of the build that holds the class.');
+  }
   const javaLevels = [...new Set(projects.map(p => p.javaVersion).filter(Boolean))];
   if (javaLevels.length) {
     const unsure = (d.buildFileHints || []).some(h => h.startsWith('Java level is not set'));
-    L.push(`- Java language level: ${javaLevels.join(', ')}${unsure && d.source === 'gradle' ? ' (as Gradle reports it; if the build never sets it, this is just the JDK Gradle ran on)' : ''}`);
+    L.push(`- Java language level: ${javaLevels.join(', ')}${unsure && d.source !== 'static' ? ' (as Gradle reports it; if the build never sets it, this is just the JDK Gradle ran on)' : ''}`);
   }
   if (s) L.push(`- Language features in use: lambdas in ${num(s.language.filesWithLambdas)} files, var in ${num(s.language.filesWithVar)}, records in ${num(s.language.filesWithRecords)}, switch expressions in ${num(s.language.filesWithSwitchExpressions)}`);
   const plugins = [...new Set(projects.flatMap(p => p.plugins || []).filter(p => !UNINTERESTING_PLUGINS.test(p))
-    .map(p => (d.source === 'gradle' ? p.split('.').pop() : p)))];
+    .map(p => (p.includes('.') && /[A-Z]/.test(p.split('.').pop()) ? p.split('.').pop() : p)))];
   if (plugins.length && d.source !== 'maven-static') L.push(`- Gradle plugins: ${plugins.slice(0, 15).join(', ')}`);
   for (const h of d.buildFileHints || []) L.push(`- Note: ${h}`);
-  if (d.gradleError) L.push(`- Gradle error: ${String(d.gradleError).split('\n').filter(Boolean).slice(0, 3).join(' / ').slice(0, 300)}`);
-  const gw = d.wrapper ? '.\\gradlew.bat' : 'gradle';
-  if (d.source !== 'maven-static' && d.source !== 'none') {
-    L.push(`- Likely test command, run in repos\\${repo} (PowerShell): \`${gw} test\``);
-    L.push(`- One test class: \`${gw} ${modules.length ? ':<module>:' : ''}test --tests "<package.ClassName>"\``);
-  }
+  if (d.gradleError) L.push(`- Gradle error: ${String(d.gradleError).split('\n').filter(Boolean).slice(0, 4).join(' / ').slice(0, 400)}`);
   L.push('');
 
   // ---- dependencies

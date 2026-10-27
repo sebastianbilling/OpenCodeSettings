@@ -142,7 +142,10 @@ export function writeDependencies(g) {
     const notInBuild = imp.filter(([k]) => !g.edges[r][k]);
     if (notInBuild.length) L.push(`- Code also imports from: ${notInBuild.map(([k, n]) => `${k} (${n} files)`).join(', ')}. Not declared directly in the build; probably reached through another jar.`);
     if (g.localJars[r].length) L.push(`- Jar files kept in the repo: ${g.localJars[r].slice(0, 8).join(', ')}${g.localJars[r].length > 8 ? ', ...' : ''}`);
-    const how = d.source === 'gradle' ? `Gradle ${d.gradleVersion}`
+    const nb = d.builds?.length || 0;
+    const how = nb > 1
+      ? `${nb} separate Gradle builds (${d.builds.map(b => b.dir || 'repo root').join(', ')}); ${d.builds.filter(b => b.source === 'gradle').length} read by Gradle, ${d.builds.filter(b => b.source !== 'gradle').length} read as text`
+      : d.source === 'gradle' ? `Gradle ${d.gradleVersion}`
       : d.source === 'static' ? `read from the build files as text${d.gradleError ? ' (Gradle could not run: ' + firstLine(d.gradleError) + ')' : ''}; may miss dependencies set up in code`
       : d.source === 'maven-static' ? 'read from pom.xml files' : 'no build information';
     L.push(`- Source: ${how}`, '');

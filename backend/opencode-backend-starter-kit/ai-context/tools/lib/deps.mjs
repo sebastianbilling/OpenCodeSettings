@@ -26,65 +26,136 @@ function versionAtLeast(v, major, minor) {
   return a > major || (a === major && b >= minor);
 }
 
-function isGradle(dir) {
-  return ['build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts'].some(f => exists(path.join(dir, f)));
+const SKIP_DIRS = new Set(['build', 'out', 'target', 'node_modules', 'bin', 'src', 'buildSrc']);
+const toPosix = p => p.split(path.sep).join('/');
+
+/**
+ * Every separate Gradle build inside a repo. A repo can be one build (settings file at the top),
+ * or several builds in subfolders, each with its own settings or build file.
+ * A folder with a settings file is a build. A folder with only a build file is part of the build
+ * whose settings file sits above it; if there is none, it is a build of its own.
+ */
+export function findBuildRoots(repoDir, maxDepth = 8) {
+  const settingsDirs = [], buildDirs = [];
+  const walk = (d, depth) => {
+    const has = f => exists(path.join(d, f));
+    if (has('settings.gradle') || has('settings.gradle.kts')) settingsDirs.push(d);
+    if (has('build.gradle') || has('build.gradle.kts')) buildDirs.push(d);
+    if (depth >= maxDepth) return;
+    let entries = [];
+    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.isDirectory() && !e.name.startsWith('.') && !SKIP_DIRS.has(e.name)) walk(path.join(d, e.name), depth + 1);
+    }
+  };
+  walk(repoDir, 0);
+  const under = (child, parent) => child === parent || child.startsWith(parent + path.sep);
+  const roots = [...settingsDirs];
+  for (const b of buildDirs) {
+    if (roots.some(r => under(b, r))) continue;
+    roots.push(b);
+  }
+  return roots.sort((a, b) => a.length - b.length || a.localeCompare(b));
 }
 
-/** Run Gradle for every repo (a few at a time) and write generated/deps/<repo>.json. */
+/** The folder with gradlew(.bat) for a build: the build folder itself or the nearest folder above it in the repo. */
+function findWrapperDir(buildDir, repoDir) {
+  let d = buildDir;
+  while (true) {
+    if (exists(path.join(d, IS_WINDOWS ? 'gradlew.bat' : 'gradlew'))) return d;
+    if (d === repoDir || !d.startsWith(repoDir)) return null;
+    d = path.dirname(d);
+  }
+}
+
+/** Ask Gradle about one build; fall back to reading its files as text. */
+async function oneBuild(buildDir, repoDir, tmpOut, { staticOnly, daemon, gradleArgs, timeoutMin, initScript }) {
+  const rel = toPosix(path.relative(repoDir, buildDir));
+  const wrapperDir = findWrapperDir(buildDir, repoDir);
+  const wv = wrapperDir ? wrapperVersion(wrapperDir) : '';
+  let result = null, gradleError = '', seconds = 0;
+  if (!staticOnly) {
+    const wrapper = wrapperDir ? path.join(wrapperDir, IS_WINDOWS ? 'gradlew.bat' : 'gradlew') : null;
+    const cmd = wrapper ? (IS_WINDOWS ? wrapper : 'sh') : (IS_WINDOWS ? 'gradle.bat' : 'gradle');
+    const args = wrapper && !IS_WINDOWS ? [wrapper] : [];
+    try { fs.rmSync(tmpOut, { force: true }); } catch { /* ignore */ }
+    args.push('-q', '-I', initScript, `-PaiDepsOut=${tmpOut}`);
+    if (!daemon) args.push('--no-daemon');
+    // Configuration cache would skip our script on a second run; switch it off where it exists (6.6+).
+    if (!wv || versionAtLeast(wv, 6, 6)) args.push('--no-configuration-cache');
+    args.push(...gradleArgs, 'help');
+    const r = await run(cmd, args, { cwd: buildDir, timeoutMs: timeoutMin * 60000 });
+    seconds = Math.round(r.ms / 1000);
+    if (r.code === 0 && exists(tmpOut)) {
+      try { result = JSON.parse(readText(tmpOut)); result.source = 'gradle'; } catch (e) { gradleError = 'could not read Gradle output: ' + e.message; }
+    } else {
+      const tail = (r.stderr || r.stdout || '').split(/\r?\n/).filter(l => l.trim() && !/^\s*at /.test(l)).slice(-12).join('\n');
+      gradleError = r.timedOut ? `Gradle took longer than ${timeoutMin} minutes` : (tail || `Gradle exited with code ${r.code}`);
+    }
+    try { fs.rmSync(tmpOut, { force: true }); } catch { /* ignore */ }
+  }
+  if (!result) result = staticGradle(buildDir);
+  return {
+    dir: rel,
+    source: result.source,
+    gradleVersion: result.gradleVersion || wv,
+    wrapperDir: wrapperDir ? toPosix(path.relative(repoDir, wrapperDir)) : null,
+    seconds,
+    error: gradleError,
+    rootProject: result.rootProject,
+    projects: (result.projects || []).map(p => ({ ...p, build: rel, dir: toPosix(path.posix.join(rel, p.dir || '')).replace(/^\.\/?/, '') }))
+  };
+}
+
+/** Run Gradle for every build in every repo (a few at a time) and write generated/deps/<repo>.json. */
 export async function collectDeps(repos, { parallel = 3, staticOnly = false, daemon = false, gradleArgs = [], timeoutMin = 15, log = console.log } = {}) {
   fs.mkdirSync(DEPS_DIR, { recursive: true });
   const initScript = path.join(TOOLS, 'ai-deps.gradle');
-  return pool(repos, parallel, async repo => {
+  const opts = { staticOnly, daemon, gradleArgs, timeoutMin, initScript };
+
+  // One job per build, so a repo with several builds does not hold up the others.
+  const jobs = [];
+  const roots = {};
+  for (const repo of repos) {
     const dir = path.join(REPOS_DIR, repo);
-    const outFile = depsFile(repo);
+    roots[repo] = findBuildRoots(dir);
+    roots[repo].forEach((b, i) => jobs.push({ repo, dir, b, i }));
+    if (roots[repo].length > 1) log(`  ${repo}: ${roots[repo].length} separate Gradle builds found`);
+  }
+  const done = await pool(jobs, parallel, async ({ repo, dir, b, i }) => {
+    const label = `${repo}${b === dir ? '' : ' (' + toPosix(path.relative(dir, b)) + ')'}`;
+    if (!staticOnly) log(`  ${label}: asking Gradle...`);
+    const res = await oneBuild(b, dir, depsFile(repo) + `.${i}.tmp`, opts);
+    if (!staticOnly) log(`  ${label}: ${res.source === 'gradle' ? `done (${res.projects.length} project${res.projects.length === 1 ? '' : 's'}, ${res.seconds}s)` : 'Gradle failed, read build files as text'}`);
+    return { repo, res };
+  });
+
+  return repos.map(repo => {
+    const dir = path.join(REPOS_DIR, repo);
+    const builds = done.filter(x => x.repo === repo).map(x => x.res).sort((a, b) => a.dir.length - b.dir.length || a.dir.localeCompare(b.dir));
     let result;
-    if (isGradle(dir)) {
-      let gradleError = '';
-      if (!staticOnly) {
-        const wrapper = path.join(dir, IS_WINDOWS ? 'gradlew.bat' : 'gradlew');
-        const wv = wrapperVersion(dir);
-        const cmd = exists(wrapper) ? (IS_WINDOWS ? wrapper : 'sh') : (IS_WINDOWS ? 'gradle.bat' : 'gradle');
-        const args = exists(wrapper) && !IS_WINDOWS ? [wrapper] : [];
-        const tmpOut = outFile + '.tmp';
-        try { fs.rmSync(tmpOut, { force: true }); } catch { /* ignore */ }
-        args.push('-q', '-I', initScript, `-PaiDepsOut=${tmpOut}`);
-        if (!daemon) args.push('--no-daemon');
-        // Configuration cache would skip our script on a second run; switch it off where it exists (6.6+).
-        if (!wv || versionAtLeast(wv, 6, 6)) args.push('--no-configuration-cache');
-        args.push(...gradleArgs, 'help');
-        log(`  ${repo}: asking Gradle${wv ? ' ' + wv : ''}...`);
-        const r = await run(cmd, args, { cwd: dir, timeoutMs: timeoutMin * 60000 });
-        if (r.code === 0 && exists(tmpOut)) {
-          try {
-            result = JSON.parse(readText(tmpOut));
-            result.source = 'gradle';
-            result.seconds = Math.round(r.ms / 1000);
-          } catch (e) { gradleError = 'could not read Gradle output: ' + e.message; }
-        } else {
-          const tail = (r.stderr || r.stdout || '').split(/\r?\n/).filter(l => l.trim() && !/^\s*at /.test(l)).slice(-12).join('\n');
-          gradleError = r.timedOut ? `Gradle took longer than ${timeoutMin} minutes` : (tail || `Gradle exited with code ${r.code}`);
-        }
-        try { fs.rmSync(tmpOut, { force: true }); } catch { /* ignore */ }
-      }
-      if (!result) {
-        result = staticGradle(dir);
-        if (gradleError) result.gradleError = gradleError;
-        log(`  ${repo}: ${staticOnly ? 'read' : 'Gradle failed, read'} build files as text`);
-      } else {
-        log(`  ${repo}: done (${result.projects.length} project${result.projects.length === 1 ? '' : 's'}, ${result.seconds}s)`);
-      }
-      if (!result.gradleVersion) result.gradleVersion = wrapperVersion(dir);
-      result.wrapper = exists(path.join(dir, 'gradlew.bat')) || exists(path.join(dir, 'gradlew'));
+    if (builds.length) {
+      const sources = new Set(builds.map(b => b.source));
+      result = {
+        source: sources.size === 1 ? [...sources][0] : 'mixed',
+        gradleVersion: [...new Set(builds.map(b => b.gradleVersion).filter(Boolean))].join(', '),
+        wrapper: builds.some(b => b.wrapperDir !== null),
+        rootProject: builds[0].rootProject,
+        builds: builds.map(({ projects, ...rest }) => ({ ...rest, projects: projects.length })),
+        projects: builds.flatMap(b => b.projects)
+      };
+      const errors = builds.filter(b => b.error).map(b => (b.dir ? `[${b.dir}] ` : '') + b.error);
+      if (errors.length) result.gradleError = errors.join('\n');
     } else if (exists(path.join(dir, 'pom.xml'))) {
       result = staticMaven(dir);
       log(`  ${repo}: Maven project, read pom.xml files`);
     } else {
-      result = { source: 'none', projects: [] };
+      result = { source: 'none', projects: [], builds: [] };
       log(`  ${repo}: no Gradle or Maven build found`);
     }
     result.repo = repo;
-    result.buildFileHints = buildHints(dir);
-    writeText(outFile, JSON.stringify(result, null, 2));
+    result.buildFileHints = [...new Set([dir, ...roots[repo]].flatMap(b => buildHints(b, toPosix(path.relative(dir, b)))))];
+    writeText(depsFile(repo), JSON.stringify(result, null, 2));
     return result;
   });
 }
@@ -251,17 +322,22 @@ export function staticMaven(dir, base = dir, out = []) {
 }
 
 /** Things the AI should know that Gradle does not report directly. */
-function buildHints(dir) {
+function buildHints(dir, label = '') {
   const hints = [];
+  const where = label ? `${label}/` : '';
   const all = ['build.gradle', 'build.gradle.kts'].map(f => readText(path.join(dir, f))).join('\n');
-  if (all && !/sourceCompatibility|targetCompatibility|languageVersion|release\s*(=|\.set)/.test(all)) hints.push('Java level is not set in the root build file (it may be set in modules or convention plugins)');
-  if (exists(path.join(dir, 'buildSrc'))) hints.push('has buildSrc/ (shared build logic lives there)');
-  if (exists(path.join(dir, 'gradle', 'libs.versions.toml'))) hints.push('uses a version catalog: gradle/libs.versions.toml');
-  if (exists(path.join(dir, 'libs')) || exists(path.join(dir, 'lib'))) hints.push('has a libs/ or lib/ folder with jar files');
+  if (all.trim() && !/sourceCompatibility|targetCompatibility|languageVersion|release\s*(=|\.set)/.test(all)) hints.push(`Java level is not set in ${where ? where + 'build.gradle' : 'the root build file'} (it may be set in modules or convention plugins)`);
+  if (exists(path.join(dir, 'buildSrc'))) hints.push(`has ${where}buildSrc/ (shared build logic lives there)`);
+  if (exists(path.join(dir, 'gradle', 'libs.versions.toml'))) hints.push(`uses a version catalog: ${where}gradle/libs.versions.toml`);
+  for (const l of ['libs', 'lib']) {
+    let jars = [];
+    try { jars = fs.readdirSync(path.join(dir, l)).filter(f => f.toLowerCase().endsWith('.jar')); } catch { /* no folder */ }
+    if (jars.length) hints.push(`has ${jars.length} jar file${jars.length === 1 ? '' : 's'} in ${where}${l}/`);
+  }
   const gp = props(path.join(dir, 'gradle.properties'));
-  if (gp['org.gradle.java.home']) hints.push('gradle.properties pins org.gradle.java.home=' + gp['org.gradle.java.home']);
-  if (exists(path.join(dir, 'Jenkinsfile'))) hints.push('has a Jenkinsfile (CI build steps can show the real build command)');
-  if (exists(path.join(dir, '.gitlab-ci.yml'))) hints.push('has .gitlab-ci.yml (CI build steps can show the real build command)');
-  if (exists(path.join(dir, 'azure-pipelines.yml'))) hints.push('has azure-pipelines.yml (CI build steps can show the real build command)');
+  if (gp['org.gradle.java.home']) hints.push(`${where}gradle.properties pins org.gradle.java.home=` + gp['org.gradle.java.home']);
+  for (const ci of ['Jenkinsfile', '.gitlab-ci.yml', 'azure-pipelines.yml']) {
+    if (exists(path.join(dir, ci))) hints.push(`has ${where}${ci} (CI build steps can show the real build command)`);
+  }
   return hints;
 }

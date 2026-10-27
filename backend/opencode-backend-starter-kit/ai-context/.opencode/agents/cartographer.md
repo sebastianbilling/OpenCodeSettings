@@ -35,7 +35,7 @@ Rules:
 - Never invent. If you could not find something out, write "Unknown" or leave the line out. Mark educated guesses with "(probably)".
 - Write for a developer who has never seen this repo: plain words, short sentences, no praise or marketing.
 - Use names exactly as they are in the code: classes, packages, modules, Gradle tasks.
-- Build and test commands come from the facts file, which reflects the real build. Do not invent Gradle tasks the build does not have.
+- Build and test commands come from the facts file, which reflects the real build. Do not invent Gradle tasks the build does not have. If the facts list several separate Gradle builds, give the folder and test command of each, and say which code belongs to which build.
 - "Go here for" is the most important line: it is how the AI picks this repo for a task. Use the words a developer would use when asking for a change, and be specific ("invoice PDF layout", not "documents").
 - Do not change any file other than the path you were given.
 - Keep a card under about 120 lines. It is read in many sessions.

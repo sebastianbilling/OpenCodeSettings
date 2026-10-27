@@ -45,7 +45,7 @@ function buildHash(repo) {
   const dir = path.join(REPOS_DIR, repo);
   const walk = (d, depth) => {
     for (const f of buildFiles) { const p = path.join(d, f); if (fs.existsSync(p)) h.update(p + readText(p)); }
-    if (depth > 3) return;
+    if (depth > 8) return;
     let entries = [];
     try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {

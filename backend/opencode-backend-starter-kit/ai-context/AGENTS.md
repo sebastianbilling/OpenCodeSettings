@@ -1,6 +1,6 @@
 # Backend workspace
 
-This folder is the **ai-context** repo. The backend's Git repos are cloned into `repos/` (this repo's Git ignores them). Each of them is its own Git repository with its own Gradle build. Everything an AI needs to find its way lives here: the map, one card per repo, shared conventions, and a code index.
+This folder is the **ai-context** repo. The backend's Git repos are cloned into `repos/` (this repo's Git ignores them). Each of them is its own Git repository. Most have one Gradle build at the top; some have several separate builds in subfolders, and the card says which folder each one is run from. Everything an AI needs to find its way lives here: the map, one card per repo, shared conventions, and a code index.
 
 ## Find your way first
 
@@ -34,7 +34,7 @@ The facts behind the cards are in `generated/facts/<repo>.md`. The dependency de
 ## Environment
 
 - Windows. Shell commands run in PowerShell: use `;` between commands, not `&&`, and PowerShell commands such as `Get-ChildItem` and `Remove-Item`, not bash ones.
-- To run something in a repo, set the bash tool's `workdir` to `repos/<repo>` instead of using `cd`. Example: command `.\gradlew.bat test`, workdir `repos/order-service`.
+- To run something in a repo, set the bash tool's `workdir` to the folder the card names (`repos/<repo>`, or a subfolder when the repo has several builds) instead of using `cd`. Example: command `.\gradlew.bat test`, workdir `repos/order-service`.
 - Each repo's Java language level is in its card. Do not use newer Java syntax than that level allows.
 - No internet. Do not add new external libraries; the internal mirror only has what the builds already use. Ask me first if you think one is needed.
 

@@ -25,12 +25,13 @@ Follow these when changing code here, even where other repos do it differently.
 - Other: <anything a newcomer would get wrong>
 
 ## Build and test
-Run in repos\<repo name> (PowerShell). From OpenCode: bash tool with workdir repos/<repo name>.
-| Task | Command |
-| --- | --- |
-| Build | `.\gradlew.bat build` |
-| All tests | `.\gradlew.bat test` |
-| One test class | `.\gradlew.bat test --tests "<package.ClassName>"` |
+PowerShell, in the folder under "Run in". From OpenCode: the bash tool with that folder as workdir.
+If the repo has several separate Gradle builds, give one set of rows per build and say in "Where things live" which code belongs to which build.
+| Task | Run in | Command |
+| --- | --- | --- |
+| Build | repos\<repo name> | `.\gradlew.bat build` |
+| All tests | repos\<repo name> | `.\gradlew.bat test` |
+| One test class | repos\<repo name> | `.\gradlew.bat test --tests "<package.ClassName>"` |
 
 ## Depends on and used by
 - Uses: <repos, and what this repo uses them for>
