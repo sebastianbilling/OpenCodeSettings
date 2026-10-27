@@ -7,3 +7,8 @@ Copy-Item $rg "$env:USERPROFILE\.cache\opencode\bin\rg.exe"
 Test-Path "$env:USERPROFILE\tools\ripgrep\rg.exe"
 [Environment]::GetEnvironmentVariable("Path", "User")
 $env:Path -split ';' | Select-String ripgrep
+
+
+$vs = Split-Path (Split-Path (Get-Command code).Source)
+$rg = Get-ChildItem $vs -Recurse -Filter rg.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+$rg
