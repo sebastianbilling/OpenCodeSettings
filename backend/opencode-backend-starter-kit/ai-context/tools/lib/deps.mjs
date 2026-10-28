@@ -3,7 +3,7 @@
 // fall back to reading the build files as text, which catches most common forms.
 import fs from 'node:fs';
 import path from 'node:path';
-import { GENERATED, REPOS_DIR, TOOLS, IS_WINDOWS, run, readText, writeText, pool } from './common.mjs';
+import { GENERATED, REPOS_DIR, TOOLS, IS_WINDOWS, run, readText, writeText, pool, which } from './common.mjs';
 
 const DEPS_DIR = path.join(GENERATED, 'deps');
 
@@ -26,31 +26,42 @@ function versionAtLeast(v, major, minor) {
   return a > major || (a === major && b >= minor);
 }
 
-const SKIP_DIRS = new Set(['build', 'out', 'target', 'node_modules', 'bin', 'src', 'buildSrc']);
 const toPosix = p => p.split(path.sep).join('/');
+const BUILD_FILES = ['build.gradle', 'build.gradle.kts'];
+const SETTINGS_FILES = ['settings.gradle', 'settings.gradle.kts'];
+const WRAPPER_FILES = ['gradlew.bat', 'gradlew'];
+const hasAny = (d, files) => files.some(f => exists(path.join(d, f)));
+
+/** Folders that never hold a build of their own: output folders, ordinary source trees, build logic. */
+function skipDir(name, full) {
+  if (name.startsWith('.') || name === 'node_modules' || name === 'buildSrc') return true;
+  if (['build', 'out', 'target', 'bin'].includes(name)) return !hasAny(full, [...BUILD_FILES, ...SETTINGS_FILES, ...WRAPPER_FILES]);
+  if (name === 'src') return exists(path.join(full, 'main')) || exists(path.join(full, 'test'));
+  return false;
+}
 
 /**
- * Every separate Gradle build inside a repo. A repo can be one build (settings file at the top),
- * or several builds in subfolders, each with its own settings or build file.
- * A folder with a settings file is a build. A folder with only a build file is part of the build
- * whose settings file sits above it; if there is none, it is a build of its own.
+ * Every separate Gradle build inside a repo, wherever it sits. A folder is a build when it has a
+ * settings file, or a Gradle wrapper (gradlew.bat) next to a build file: that is where people start
+ * Gradle. A build file with neither, and no such build above it, is a build of its own.
  */
-export function findBuildRoots(repoDir, maxDepth = 8) {
-  const settingsDirs = [], buildDirs = [];
+export function findBuildRoots(repoDir, maxDepth = 10) {
+  const settingsDirs = [], buildDirs = [], wrapperDirs = [];
   const walk = (d, depth) => {
-    const has = f => exists(path.join(d, f));
-    if (has('settings.gradle') || has('settings.gradle.kts')) settingsDirs.push(d);
-    if (has('build.gradle') || has('build.gradle.kts')) buildDirs.push(d);
+    if (hasAny(d, SETTINGS_FILES)) settingsDirs.push(d);
+    if (hasAny(d, BUILD_FILES)) buildDirs.push(d);
+    if (hasAny(d, WRAPPER_FILES)) wrapperDirs.push(d);
     if (depth >= maxDepth) return;
     let entries = [];
     try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
-      if (e.isDirectory() && !e.name.startsWith('.') && !SKIP_DIRS.has(e.name)) walk(path.join(d, e.name), depth + 1);
+      const full = path.join(d, e.name);
+      if (e.isDirectory() && !skipDir(e.name, full)) walk(full, depth + 1);
     }
   };
   walk(repoDir, 0);
   const under = (child, parent) => child === parent || child.startsWith(parent + path.sep);
-  const roots = [...settingsDirs];
+  const roots = [...new Set([...settingsDirs, ...wrapperDirs.filter(w => hasAny(w, [...BUILD_FILES, ...SETTINGS_FILES]))])];
   for (const b of buildDirs) {
     if (roots.some(r => under(b, r))) continue;
     roots.push(b);
@@ -73,10 +84,12 @@ async function oneBuild(buildDir, repoDir, tmpOut, { staticOnly, daemon, gradleA
   const rel = toPosix(path.relative(repoDir, buildDir));
   const wrapperDir = findWrapperDir(buildDir, repoDir);
   const wv = wrapperDir ? wrapperVersion(wrapperDir) : '';
+  const globalGradle = wrapperDir ? null : which('gradle');
+  const runner = wrapperDir ? 'wrapper' : globalGradle ? 'gradle' : 'none';
   let result = null, gradleError = '', seconds = 0;
-  if (!staticOnly) {
+  if (!staticOnly && runner !== 'none') {
     const wrapper = wrapperDir ? path.join(wrapperDir, IS_WINDOWS ? 'gradlew.bat' : 'gradlew') : null;
-    const cmd = wrapper ? (IS_WINDOWS ? wrapper : 'sh') : (IS_WINDOWS ? 'gradle.bat' : 'gradle');
+    const cmd = wrapper ? (IS_WINDOWS ? wrapper : 'sh') : globalGradle;
     const args = wrapper && !IS_WINDOWS ? [wrapper] : [];
     try { fs.rmSync(tmpOut, { force: true }); } catch { /* ignore */ }
     args.push('-q', '-I', initScript, `-PaiDepsOut=${tmpOut}`);
@@ -100,6 +113,7 @@ async function oneBuild(buildDir, repoDir, tmpOut, { staticOnly, daemon, gradleA
     source: result.source,
     gradleVersion: result.gradleVersion || wv,
     wrapperDir: wrapperDir ? toPosix(path.relative(repoDir, wrapperDir)) : null,
+    runner,
     seconds,
     error: gradleError,
     rootProject: result.rootProject,
@@ -124,9 +138,11 @@ export async function collectDeps(repos, { parallel = 3, staticOnly = false, dae
   }
   const done = await pool(jobs, parallel, async ({ repo, dir, b, i }) => {
     const label = `${repo}${b === dir ? '' : ' (' + toPosix(path.relative(dir, b)) + ')'}`;
-    if (!staticOnly) log(`  ${label}: asking Gradle...`);
     const res = await oneBuild(b, dir, depsFile(repo) + `.${i}.tmp`, opts);
-    if (!staticOnly) log(`  ${label}: ${res.source === 'gradle' ? `done (${res.projects.length} project${res.projects.length === 1 ? '' : 's'}, ${res.seconds}s)` : 'Gradle failed, read build files as text'}`);
+    if (!staticOnly) {
+      if (res.runner === 'none') log(`  ${label}: no Gradle wrapper for this build, read build files as text`);
+      else log(`  ${label}: ${res.source === 'gradle' ? `done (${res.projects.length} project${res.projects.length === 1 ? '' : 's'}, ${res.seconds}s)` : 'Gradle failed, read build files as text'}`);
+    }
     return { repo, res };
   });
 
@@ -146,6 +162,8 @@ export async function collectDeps(repos, { parallel = 3, staticOnly = false, dae
       };
       const errors = builds.filter(b => b.error).map(b => (b.dir ? `[${b.dir}] ` : '') + b.error);
       if (errors.length) result.gradleError = errors.join('\n');
+      const noWrapper = builds.filter(b => b.runner === 'none').map(b => b.dir || '(top)');
+      if (noWrapper.length) result.noWrapper = noWrapper;
     } else if (exists(path.join(dir, 'pom.xml'))) {
       result = staticMaven(dir);
       log(`  ${repo}: Maven project, read pom.xml files`);

@@ -53,26 +53,31 @@ export function writeFacts(repo, g) {
   const win = p => p.replace(/\//g, '\\');
   const testCmd = b => {
     const where = b.dir ? `repos\\${repo}\\${win(b.dir)}` : `repos\\${repo}`;
+    if (b.runner === 'none') return { runIn: where, cmd: null };
     if (b.wrapperDir === null || b.wrapperDir === undefined) return { runIn: where, cmd: 'gradle' };
     if (b.wrapperDir === b.dir) return { runIn: where, cmd: '.\\gradlew.bat' };
     const wdir = b.wrapperDir ? `repos\\${repo}\\${win(b.wrapperDir)}` : `repos\\${repo}`;
     return { runIn: wdir, cmd: `.\\gradlew.bat -p ${win(path.posix.relative(b.wrapperDir, b.dir))}` };
   };
-  const how = b => (b.source === 'gradle' ? `asked Gradle ${b.gradleVersion || ''}`.trim() : `read the build files as text${b.error ? ' (Gradle could not run here)' : ''}`);
+  const how = b => (b.source === 'gradle' ? `asked Gradle ${b.gradleVersion || ''}`.trim()
+    : `read the build files as text${b.error ? ' (Gradle could not run here)' : b.runner === 'none' ? ' (no Gradle wrapper found)' : ''}`);
   if (d.source === 'maven-static') L.push('- Build: Maven; facts below: read pom.xml');
   else if (!builds.length) L.push('- Build: no Gradle or Maven build found');
   else if (builds.length === 1) {
     const b = builds[0], t = testCmd(b);
     L.push(`- Build: Gradle${b.gradleVersion ? ' ' + b.gradleVersion : ''}${b.wrapperDir !== null && b.wrapperDir !== undefined ? ' (wrapper in repo)' : ''}${b.dir ? ` in ${b.dir}/` : ''}; facts below: ${how(b)}`);
     if (modules.length) L.push(`- Modules (${modules.length}): ${modules.slice(0, 30).join(', ')}${modules.length > 30 ? ', ...' : ''}`);
-    L.push(`- Likely test command, run in ${t.runIn} (PowerShell): \`${t.cmd} test\``);
-    L.push(`- One test class: \`${t.cmd} ${modules.length ? ':<module>:' : ''}test --tests "<package.ClassName>"\``);
+    if (!t.cmd) L.push(`- Test command: unknown. No Gradle wrapper (gradlew.bat) was found for this build and Gradle is not installed as a command. Ask a person how this repo is built.`);
+    else {
+      L.push(`- Likely test command, run in ${t.runIn} (PowerShell): \`${t.cmd} test\``);
+      L.push(`- One test class: \`${t.cmd} ${modules.length ? ':<module>:' : ''}test --tests "<package.ClassName>"\``);
+    }
   } else {
     L.push(`- Gradle builds: ${builds.length} separate builds in this repo, each in its own folder with its own test command:`);
     for (const b of builds) {
       const t = testCmd(b);
       const mods = projects.filter(p => p.build === b.dir && p.path !== ':').map(p => p.path);
-      L.push(`    - ${b.dir || '(repo root)'}: ${how(b)}.${mods.length ? ` Modules (${mods.length}): ${mods.slice(0, 15).join(', ')}${mods.length > 15 ? ', ...' : ''}.` : ''} Tests: run in ${t.runIn}: \`${t.cmd} test\``);
+      L.push(`    - ${b.dir || '(repo root)'}: ${how(b)}.${mods.length ? ` Modules (${mods.length}): ${mods.slice(0, 15).join(', ')}${mods.length > 15 ? ', ...' : ''}.` : ''} ${t.cmd ? `Tests: run in ${t.runIn}: \`${t.cmd} test\`` : 'Tests: unknown, no Gradle wrapper found for this build (ask a person how it is built)'}`);
     }
     L.push('- One test class: add `--tests "<package.ClassName>"` to the test command of the build that holds the class.');
   }

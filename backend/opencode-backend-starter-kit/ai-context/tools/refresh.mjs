@@ -63,7 +63,7 @@ for (const r of only) {
   const known = state[r]?.buildHash === hashes[r] && fs.existsSync(depsFile(r));
   if (flags['gradle-all'] || !known) needGradle.push(r);
 }
-const gradleFailed = [];
+const gradleFailed = [], noWrapper = [];
 if (flags['skip-gradle']) {
   // Nothing is recorded, so the next normal refresh still asks Gradle.
   console.log('2/4 Not running Gradle (--skip-gradle).');
@@ -81,6 +81,7 @@ if (flags['skip-gradle']) {
     const r = needGradle[i];
     state[r] = { buildHash: hashes[r], source: res.source, checked: new Date().toISOString() };
     if (res.gradleError) gradleFailed.push(r);
+    if (res.noWrapper) noWrapper.push(`${r} (${res.noWrapper.join(', ')})`);
   });
   writeText(STATE, JSON.stringify(state, null, 2));
 } else console.log('2/4 Build files unchanged since last time; reusing dependency data.');
@@ -113,6 +114,7 @@ for (const r of all) {
 }
 const secs = Math.round((Date.now() - started) / 1000);
 console.log(`\nDone in ${secs}s.`);
+if (noWrapper.length) console.log(`No Gradle wrapper (gradlew.bat) found for some builds, so their build files were read as text: ${noWrapper.join(', ')}`);
 if (gradleFailed.length) console.log(`Gradle could not run for: ${gradleFailed.join(', ')}. Their build files were read as text instead.\n  To retry with another JDK: set $env:JAVA_HOME, then node tools/refresh.mjs --only ${gradleFailed.join(',')} --gradle-all`);
 if (missing.length) console.log(`Repos without a card (${missing.length}): ${missing.join(', ')}`);
 if (stale.length) console.log(`Cards that may be out of date: ${stale.join(', ')}\n  Update one with /update-card <repo> in OpenCode.`);
