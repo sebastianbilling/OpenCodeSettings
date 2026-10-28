@@ -60,3 +60,54 @@ Then tell me to: close every terminal program completely (Windows Terminal, and 
 
 
 node -e "const fs=require('fs'); for (const f of fs.readdirSync('generated/deps').filter(x=>x.endsWith('.json'))) { const d=JSON.parse(fs.readFileSync('generated/deps/'+f,'utf8')); for (const b of (d.builds||[])) if (b.error) console.log(d.repo+' | '+(b.dir||'(top)')+' | '+b.error.split(/\r?\n/).slice(-4).join(' / ')) }"
+
+
+Diagnose why Gradle fails for some builds when tools/refresh.mjs runs. Do NOT fix anything: only investigate and write a report.
+
+Rules:
+- Windows PowerShell syntax only (no &&, no bash commands). This machine has no internet: never try to download anything.
+- Do not create, change or delete any file inside repos\ or tools\. The only files you may write are generated\gradle-diagnosis.md and generated\diag-test.json.
+- Only run these Gradle tasks: help and --version. No build, test or clean.
+- Gradle is slow: give every Gradle command a timeout of 900000 ms (the bash tool's timeout parameter).
+- Show me each command and the important part of its output as you go.
+
+Step 1. List all builds and their errors. Run exactly:
+node -e "const fs=require('fs');let ok=0,bad=0;for(const f of fs.readdirSync('generated/deps').filter(x=>x.endsWith('.json'))){const d=JSON.parse(fs.readFileSync('generated/deps/'+f,'utf8'));for(const b of (d.builds||[])){if(b.source==='gradle'){ok++;continue}bad++;console.log([d.repo,b.dir||'(top)','wrapper: '+(b.wrapperDir??'none'),'gradle '+(b.gradleVersion||'?'),(b.error||'no wrapper, not tried').split(/\r?\n/).slice(-3).join(' / ')].join(' | '))}}console.log('worked: '+ok+', failed: '+bad)"
+
+Step 2. Sort the failed builds into groups by their error text:
+ A. "Unsupported class file major version", "Could not initialize class", "Could not determine java version": Gradle too old for this Java.
+ B. "Could not install Gradle distribution", "Downloading https://", "UnknownHost": the wrapper wants to download a Gradle version that is not on this machine.
+ C. "Unknown command-line option": a command-line option this Gradle version does not know.
+ D. "Plugin ... was not found", "Could not resolve": plugins or libraries the internal mirror does not provide.
+ E. "Project ... could not be found", "Could not get unknown property", "settings": the folder is not meant to be built on its own.
+ F. "no wrapper, not tried": no gradlew.bat was found for that build.
+ G. Anything else, including timeouts.
+
+Step 3. Pick ONE build from each group (at most 6 builds in total). For each one:
+ a) The wrapper settings: Get-Content <repos\repo\wrapper folder>\gradle\wrapper\gradle-wrapper.properties
+ b) Gradle versions already on this machine: Get-ChildItem "$env:USERPROFILE\.gradle\wrapper\dists" -Directory | Select-Object -ExpandProperty Name
+ c) How IntelliJ builds it: Get-ChildItem repos\<repo> -Recurse -Filter gradle.xml -ErrorAction SilentlyContinue | Where-Object { $_.DirectoryName -like '*\.idea' } | Select-Object -ExpandProperty FullName
+    Read each file found and note gradleHome, gradleJvm, distributionType and externalProjectPath.
+ d) Java settings: the lines with "java.home" in gradle.properties of the build folder and in "$env:USERPROFILE\.gradle\gradle.properties". Never show passwords or tokens.
+ e) Plain Gradle WITHOUT our script. Bash tool workdir = the folder that holds gradlew.bat. If the build is in a subfolder of it, add -p <relative path to the build folder>:
+      .\gradlew.bat --version
+      .\gradlew.bat --no-daemon help
+ f) If e) worked: the same WITH our script, exactly as refresh.mjs runs it (full paths, keep the quotes):
+      .\gradlew.bat -q -I "<full path of the ai-context folder>\tools\ai-deps.gradle" "-PaiDepsOut=<full path of the ai-context folder>\generated\diag-test.json" --no-daemon --no-configuration-cache help
+    If it complains about --no-configuration-cache, run it once more without that option.
+    Then check: Test-Path "<full path of the ai-context folder>\generated\diag-test.json"
+ g) If e) failed in group A: list the JDKs on this machine:
+      Get-ChildItem "C:\Program Files\Java", "C:\Program Files\Eclipse Adoptium", "C:\Program Files\Amazon Corretto", "C:\Program Files\Microsoft", "$env:USERPROFILE\.jdks" -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+    Retry e) once with an older JDK, in ONE command so it only applies to that command:
+      $env:JAVA_HOME = "<path to a JDK 8, 11 or 17>"; .\gradlew.bat --no-daemon help
+ h) If e) and f) both worked for a build that still fails in the refresh, run the refresh for that repo alone (it will ask me for permission):
+      node tools/refresh.mjs --only <repo> --gradle-all --skip-index
+    Then repeat step 1 and note whether that build now works.
+
+Step 4. Write generated\gradle-diagnosis.md, at most 80 lines:
+- One line: how many builds worked and how many failed, and the Java version (java -version).
+- A table: Group | Number of builds | Example (repo and folder) | Key error line | What you tried | Result.
+- Per group: the likely cause in one sentence, and what would fix it (for example "use JDK 11 for these builds", "Gradle 6.8 is not in .gradle\wrapper\dists", "our ai-deps.gradle script breaks on old Gradle").
+- Whether f) or h) failed where e) worked, with the exact error lines: that means our script, or the way refresh.mjs starts Gradle, is the problem.
+- What IntelliJ uses for the repos you checked (Gradle home, Gradle JVM).
+Then show the whole report in your reply, so I can copy it.
