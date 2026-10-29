@@ -8,6 +8,9 @@
 //     generated/index/types.tsv    every class, interface, enum, record and annotation type
 //     generated/index/members.tsv  every non-private method and constructor
 //     generated/index/refs.tsv     which files use which type (same repo and across repos)
+//     generated/index/files.tsv    per file: size, integrations (JMS, REST, JDBC...), SQL tables, config keys, URLs
+//     generated/index/enums.tsv    enum types and their constants (often business states)
+//     generated/index/throws.tsv   exceptions thrown with a message (often business rules)
 //     generated/stats/<repo>.json  counts per repo: naming, packages, tests, frameworks, ...
 //     generated/index/meta.json    when and what was indexed
 //
@@ -97,12 +100,16 @@ public class JavaIndexer {
         List<FileRec> allFiles = new ArrayList<>();
         List<TypeRec> allTypes = new ArrayList<>();
         List<MemberRec> allMembers = new ArrayList<>();
+        List<EnumRec> allEnums = new ArrayList<>();
+        List<ThrowRec> allThrows = new ArrayList<>();
         int done = 0;
         for (Future<BatchResult> f : futures) {
             BatchResult r = f.get();
             allFiles.addAll(r.files);
             allTypes.addAll(r.types);
             allMembers.addAll(r.members);
+            allEnums.addAll(r.enums);
+            allThrows.addAll(r.throwsList);
             stats.get(r.repo).merge(r.stats);
             done++;
             if (done % 20 == 0 || done == futures.size())
@@ -183,6 +190,29 @@ public class JavaIndexer {
                         m.mods, m.signature, String.join(";", m.annotations)));
                 w.write("\n");
             }
+        }
+
+        try (BufferedWriter w = Files.newBufferedWriter(indexDir.resolve("files.tsv"), StandardCharsets.UTF_8)) {
+            w.write("repo\tfile\tpkg\ttest\tlines\tintegrations\tsqlTables\tconfigKeys\turls\n");
+            for (FileRec f : allFiles) {
+                String tables = f.sqlTables.entrySet().stream().limit(40).map(e -> e.getKey() + ":" + e.getValue()).collect(Collectors.joining(","));
+                w.write(String.join("\t", f.repo, f.path, f.pkg, f.test ? "1" : "0", String.valueOf(f.lines),
+                        String.join(",", f.integrations), tables,
+                        f.configKeys.stream().limit(40).collect(Collectors.joining(",")),
+                        f.urls.stream().limit(10).collect(Collectors.joining(","))));
+                w.write("\n");
+            }
+        }
+        try (BufferedWriter w = Files.newBufferedWriter(indexDir.resolve("enums.tsv"), StandardCharsets.UTF_8)) {
+            w.write("fqn\trepo\tfile\tline\tconstants\n");
+            for (EnumRec e : allEnums)
+                w.write(String.join("\t", e.fqn(), e.repo(), e.file(), String.valueOf(e.line()),
+                        e.constants().stream().limit(60).collect(Collectors.joining(","))) + "\n");
+        }
+        try (BufferedWriter w = Files.newBufferedWriter(indexDir.resolve("throws.tsv"), StandardCharsets.UTF_8)) {
+            w.write("repo\tfile\tline\ttype\tmethod\texception\tmessage\n");
+            for (ThrowRec t : allThrows)
+                w.write(String.join("\t", t.repo(), t.file(), String.valueOf(t.line()), t.type(), t.method(), t.exception(), t.message()) + "\n");
         }
 
         // 5. Per-repo statistics.
@@ -271,8 +301,14 @@ public class JavaIndexer {
     static final class FileRec {
         String repo, path, pkg = "";
         boolean test;
+        int lines;
         Set<String> imports = new HashSet<>(), wildcards = new HashSet<>(), ids = new HashSet<>(), qualified = new HashSet<>();
+        Set<String> integrations = new TreeSet<>(), configKeys = new TreeSet<>(), urls = new TreeSet<>();
+        Map<String, Integer> sqlTables = new TreeMap<>();
     }
+
+    record EnumRec(String fqn, String repo, String file, int line, List<String> constants) {}
+    record ThrowRec(String repo, String file, int line, String type, String method, String exception, String message) {}
 
     static final class TypeRec {
         String fqn, simple, kind, repo, file, pkg, outer, mods = "", ext = "", doc = "";
@@ -334,6 +370,7 @@ public class JavaIndexer {
                 f.repo = repo;
                 f.path = rel;
                 f.test = test;
+                f.lines = lines;
                 if (cu.getPackageName() != null) f.pkg = cu.getPackageName().toString();
                 for (ImportTree it : cu.getImports()) {
                     String s = it.getQualifiedIdentifier().toString();
@@ -344,6 +381,8 @@ public class JavaIndexer {
                     }
                     if (s.endsWith(".*")) f.wildcards.add(s.substring(0, s.length() - 2));
                     else f.imports.add(s);
+                    String kind = integrationOf(s);
+                    if (kind != null) f.integrations.add(kind);
                 }
                 res.stats.addFile(f, lines, test, errorFiles.contains(uri), cu);
                 try {
@@ -362,6 +401,8 @@ public class JavaIndexer {
         final List<FileRec> files = new ArrayList<>();
         final List<TypeRec> types = new ArrayList<>();
         final List<MemberRec> members = new ArrayList<>();
+        final List<EnumRec> enums = new ArrayList<>();
+        final List<ThrowRec> throwsList = new ArrayList<>();
         final RepoStats stats;
         BatchResult(String repo) { this.repo = repo; this.stats = new RepoStats(repo); }
     }
@@ -405,6 +446,7 @@ public class JavaIndexer {
         final String text;
         final LinkedList<TypeRec> typeStack = new LinkedList<>(); // may hold null for anonymous classes
         boolean sawLambda, sawSwitchExpr, sawRecord, sawVar;
+        final Deque<String> methodStack = new ArrayDeque<>();
 
         Scanner(BatchResult res, FileRec f, CompilationUnitTree cu, Trees trees, String text) {
             this.res = res; this.f = f; this.cu = cu; this.trees = trees; this.pos = trees.getSourcePositions(); this.text = text;
@@ -466,6 +508,15 @@ public class JavaIndexer {
                 res.stats.addType(t, doc != null && !doc.isBlank());
             }
             for (String a : t.annotations) res.stats.addAnnotation(a, f.test);
+            if (!localClass && ct.getKind() == Tree.Kind.ENUM) {
+                List<String> constants = new ArrayList<>();
+                for (Tree m : ct.getMembers()) {
+                    if (m instanceof VariableTree vt && vt.getInitializer() instanceof NewClassTree
+                            && vt.getType() != null && plainType(vt.getType().toString()).equals(name))
+                        constants.add(vt.getName().toString());
+                }
+                if (!constants.isEmpty()) res.enums.add(new EnumRec(t.fqn, f.repo, f.path, t.line, constants));
+            }
             typeStack.push(localClass ? null : t);
             try { return super.visitClass(ct, v); } finally { typeStack.pop(); }
         }
@@ -508,7 +559,8 @@ public class JavaIndexer {
                     res.members.add(m);
                 }
             }
-            return super.visitMethod(mt, v);
+            methodStack.push(mt.getName().contentEquals("<init>") ? "<init>" : mt.getName().toString());
+            try { return super.visitMethod(mt, v); } finally { methodStack.pop(); }
         }
 
         @Override public Void visitVariable(VariableTree vt, Void v) {
@@ -548,6 +600,77 @@ public class JavaIndexer {
             return super.visitMemberSelect(ms, v);
         }
 
+        @Override public Void visitThrow(ThrowTree tt, Void v) {
+            if (!f.test && tt.getExpression() instanceof NewClassTree nc) {
+                String ex = plainType(nc.getIdentifier().toString());
+                if (ex.contains(".")) ex = ex.substring(ex.lastIndexOf('.') + 1);
+                String msg = messageOf(nc.getArguments());
+                TypeRec owner = typeStack.peek();
+                res.throwsList.add(new ThrowRec(f.repo, f.path, line(tt), owner == null ? "" : owner.fqn,
+                        methodStack.isEmpty() ? "" : methodStack.peek(), ex, msg == null ? "" : msg));
+            }
+            return super.visitThrow(tt, v);
+        }
+
+        @Override public Void visitLiteral(LiteralTree lt, Void v) {
+            if (lt.getValue() instanceof String str && !f.test) {
+                TreePath parent = getCurrentPath().getParentPath();
+                boolean inConcat = parent != null && parent.getLeaf().getKind() == Tree.Kind.PLUS;
+                if (!inConcat) noteString(str);
+            }
+            return super.visitLiteral(lt, v);
+        }
+
+        @Override public Void visitBinary(BinaryTree bt, Void v) {
+            if (bt.getKind() == Tree.Kind.PLUS && !f.test) {
+                TreePath parent = getCurrentPath().getParentPath();
+                boolean top = parent == null || parent.getLeaf().getKind() != Tree.Kind.PLUS;
+                if (top) {
+                    StringBuilder sb = new StringBuilder();
+                    if (joinLiterals(bt, sb)) noteString(sb.toString());
+                }
+            }
+            return super.visitBinary(bt, v);
+        }
+
+        @Override public Void visitMethodInvocation(MethodInvocationTree mi, Void v) {
+            if (!f.test && !mi.getArguments().isEmpty() && mi.getArguments().get(0) instanceof LiteralTree lt
+                    && lt.getValue() instanceof String key) {
+                String name = mi.getMethodSelect() instanceof MemberSelectTree ms ? ms.getIdentifier().toString()
+                        : mi.getMethodSelect().toString();
+                if (CONFIG_GETTERS.contains(name) && CONFIG_KEY.matcher(key).matches() && !SYSTEM_PROPERTY.matcher(key).find()) f.configKeys.add(key);
+            }
+            return super.visitMethodInvocation(mi, v);
+        }
+
+        /** Concatenated string literals; non-literal parts become "?". False if there is no literal at all. */
+        boolean joinLiterals(ExpressionTree e, StringBuilder sb) {
+            if (e instanceof BinaryTree b && b.getKind() == Tree.Kind.PLUS) {
+                boolean l = joinLiterals(b.getLeftOperand(), sb), r = joinLiterals(b.getRightOperand(), sb);
+                return l || r;
+            }
+            if (e instanceof ParenthesizedTree pt) return joinLiterals(pt.getExpression(), sb);
+            if (e instanceof LiteralTree lt && lt.getValue() instanceof String str) { sb.append(str); return true; }
+            sb.append('?');
+            return false;
+        }
+
+        void noteString(String str) {
+            if (str.length() < 6) return;
+            java.util.regex.Matcher pm = PLACEHOLDER.matcher(str);
+            while (pm.find()) f.configKeys.add(pm.group(1));
+            java.util.regex.Matcher um = URL.matcher(str);
+            while (um.find()) f.urls.add(um.group(1));
+            if (SQL.matcher(str).find()) {
+                java.util.regex.Matcher tm = SQL_TABLE.matcher(str);
+                while (tm.find()) {
+                    String table = tm.group(1);
+                    if (table.equals("?") || table.equalsIgnoreCase("dual") || table.length() < 2) continue;
+                    f.sqlTables.merge(table, 1, Integer::sum);
+                }
+            }
+        }
+
         @Override public Void visitLambdaExpression(LambdaExpressionTree lt, Void v) {
             sawLambda = true;
             return super.visitLambdaExpression(lt, v);
@@ -560,6 +683,44 @@ public class JavaIndexer {
     }
 
     // ------------------------------------------------------------------ helpers
+
+    static final Pattern PLACEHOLDER = Pattern.compile("\\$\\{([A-Za-z][\\w.\\-]*)(?::[^}]*)?}");
+    static final Pattern URL = Pattern.compile("https?://([A-Za-z0-9.\\-]+(?::\\d+)?)");
+    static final Pattern SQL = Pattern.compile("(?is)^\\s*(select\\s.+\\sfrom\\s|insert\\s+into\\s|update\\s+\\S+\\s+set\\s|delete\\s+from\\s|merge\\s+into\\s|with\\s+\\w+\\s+as\\s*\\()|\\s(from|join)\\s+[A-Za-z_][\\w.$]*\\s+(where|join|inner|left|order|group|on)\\s");
+    static final Pattern SQL_TABLE = Pattern.compile("(?i)\\b(?:from|join|into|update|merge\\s+into)\\s+([A-Za-z_][\\w$]*(?:\\.[A-Za-z_][\\w$]*)?)");
+    static final Pattern CONFIG_KEY = Pattern.compile("[A-Za-z][\\w\\-]*(\\.[A-Za-z0-9_\\-]+)+");
+    static final Pattern SYSTEM_PROPERTY = Pattern.compile("^(java|javax|jdk|sun|user|os|file|line|path)\\.");
+    static final Set<String> CONFIG_GETTERS = Set.of("getProperty", "getString", "getInt", "getInteger", "getLong",
+            "getBoolean", "getDouble", "getRequiredProperty", "getValue", "getConfig", "getSetting", "getParameter", "getenv");
+
+    /** What kind of outside system a file talks to, judged from one import. Null if none. */
+    static String integrationOf(String imp) {
+        String s = imp;
+        String[][] rules = {
+            {"javax.jms.", "JMS"}, {"jakarta.jms.", "JMS"}, {"org.springframework.jms.", "JMS"}, {"com.ibm.mq.", "IBM MQ"}, {"com.ibm.msg.", "IBM MQ"},
+            {"org.apache.kafka.", "Kafka"}, {"org.springframework.kafka.", "Kafka"},
+            {"com.rabbitmq.", "RabbitMQ"}, {"org.springframework.amqp.", "RabbitMQ"},
+            {"javax.ws.rs.client.", "REST client"}, {"jakarta.ws.rs.client.", "REST client"}, {"org.springframework.web.client.", "REST client"},
+            {"org.springframework.web.reactive.function.client.", "REST client"}, {"java.net.http.", "REST client"}, {"org.apache.http.", "REST client"},
+            {"org.apache.hc.", "REST client"}, {"okhttp3.", "REST client"}, {"feign.", "REST client"}, {"retrofit2.", "REST client"},
+            {"com.sun.jersey.api.client.", "REST client"}, {"org.glassfish.jersey.client.", "REST client"}, {"java.net.HttpURLConnection", "REST client"},
+            {"javax.ws.rs.", "REST endpoint"}, {"jakarta.ws.rs.", "REST endpoint"}, {"org.springframework.web.bind.annotation.", "REST endpoint"},
+            {"javax.servlet.", "Servlet"}, {"jakarta.servlet.", "Servlet"},
+            {"javax.xml.ws.", "SOAP"}, {"jakarta.xml.ws.", "SOAP"}, {"javax.jws.", "SOAP"}, {"jakarta.jws.", "SOAP"}, {"org.apache.cxf.", "SOAP"}, {"org.springframework.ws.", "SOAP"}, {"org.apache.axis", "SOAP"},
+            {"javax.persistence.", "JPA"}, {"jakarta.persistence.", "JPA"}, {"org.hibernate.", "Hibernate"},
+            {"java.sql.", "JDBC"}, {"javax.sql.", "JDBC"}, {"org.springframework.jdbc.", "JDBC"}, {"org.jooq.", "jOOQ"},
+            {"org.apache.ibatis.", "MyBatis"}, {"org.mybatis.", "MyBatis"},
+            {"javax.mail.", "Mail"}, {"jakarta.mail.", "Mail"}, {"org.apache.commons.net.", "FTP"}, {"com.jcraft.jsch.", "SFTP"},
+            {"org.quartz.", "Quartz"}, {"org.springframework.scheduling.", "Scheduling"}, {"org.springframework.batch.", "Spring Batch"},
+            {"javax.ejb.", "EJB"}, {"jakarta.ejb.", "EJB"}, {"java.rmi.", "RMI"}, {"javax.naming.", "JNDI/LDAP"}, {"org.springframework.ldap.", "JNDI/LDAP"},
+            {"redis.clients.", "Redis"}, {"org.springframework.data.redis.", "Redis"}, {"net.sf.ehcache.", "Cache"}, {"javax.cache.", "Cache"},
+            {"org.elasticsearch.", "Elasticsearch"}, {"com.mongodb.", "MongoDB"}, {"org.springframework.data.mongodb.", "MongoDB"},
+            {"javax.xml.bind.", "XML binding"}, {"jakarta.xml.bind.", "XML binding"}, {"org.apache.poi.", "Excel/Office files"},
+            {"com.itextpdf.", "PDF"}, {"org.apache.pdfbox.", "PDF"}, {"net.sf.jasperreports.", "Reports"}
+        };
+        for (String[] r : rules) if (s.startsWith(r[0]) || s.equals(r[0])) return r[1];
+        return null;
+    }
 
     static final Pattern GENERICS = Pattern.compile("<[^<>]*>");
     static final Pattern TYPE_ANNOS = Pattern.compile("@[\\w.]+(\\([^)]*\\))?\\s*");
@@ -609,6 +770,31 @@ public class JavaIndexer {
             }
         }
         return null;
+    }
+
+    /** The first argument that holds text, with non-text parts shown as an ellipsis: "Order " + id + " not found" -> "Order ... not found". */
+    static String messageOf(List<? extends ExpressionTree> args) {
+        for (ExpressionTree e : args) {
+            StringBuilder sb = new StringBuilder();
+            if (textOf(e, sb)) {
+                String m = clean(sb.toString()).replaceAll("(\u2026\\s*)+\u2026", "\u2026").trim();
+                return m.length() > 160 ? m.substring(0, 157) + "..." : m;
+            }
+        }
+        return null;
+    }
+
+    static boolean textOf(ExpressionTree e, StringBuilder sb) {
+        if (e instanceof BinaryTree b && b.getKind() == Tree.Kind.PLUS) {
+            boolean l = textOf(b.getLeftOperand(), sb), r = textOf(b.getRightOperand(), sb);
+            return l || r;
+        }
+        if (e instanceof ParenthesizedTree pt) return textOf(pt.getExpression(), sb);
+        if (e instanceof LiteralTree lt && lt.getValue() instanceof String str) { sb.append(str); return true; }
+        if (e instanceof MethodInvocationTree mi && mi.getMethodSelect().toString().endsWith("format") && !mi.getArguments().isEmpty())
+            return textOf(mi.getArguments().get(0), sb);
+        sb.append('\u2026');
+        return false;
     }
 
     static String stringIn(ExpressionTree e) {

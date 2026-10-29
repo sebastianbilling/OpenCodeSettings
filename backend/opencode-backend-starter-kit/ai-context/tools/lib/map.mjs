@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { CARDS, CONTEXT, GENERATED, readJson, readText, writeText, today } from './common.mjs';
 import { depsFile } from './deps.mjs';
+import { readAreaList } from './areas.mjs';
 
 const isTestConfig = c => /^test|Test[A-Z]|^integrationTest/.test(c || '');
 const realGroup = g => g && g !== 'unspecified' && g !== 'null';
@@ -219,6 +220,8 @@ export function writeRepoMap(g) {
       }
     }
     L.push(`Uses: ${Object.keys(g.edges[r]).length ? Object.keys(g.edges[r]).sort().join(', ') : '(none)'} · Used by: ${g.usedBy[r].length ? g.usedBy[r].join(', ') : '(none)'}`);
+    const areas = readAreaList(r);
+    if (areas.length > 1) L.push(`Areas: ${areas.map(a => a.name).join(', ')} (context/areas/${r}/README.md)`);
     L.push('');
   }
   // Team decisions, so they are found like a repo.

@@ -3,10 +3,11 @@
 //
 //   node tools/changed.mjs              repos with uncommitted changes or unpushed commits, and their files
 //   node tools/changed.mjs --card <repo>  what changed in a repo since its card was written (used by /update-card)
+//   node tools/changed.mjs --area <repo> <area>  what changed in one area since its note was written (used by /update-area)
 import path from 'node:path';
 import { CARDS, REPOS_DIR, ROOT, git, listRepos, parseArgs, pool, readText, run, today } from './lib/common.mjs';
 
-const { flags } = parseArgs();
+const { flags, positional } = parseArgs();
 
 if (typeof flags.card === 'string') {
   const repo = flags.card;
@@ -25,6 +26,36 @@ if (typeof flags.card === 'string') {
     const log = git(dir, ['log', '--oneline', '--no-merges', '-30', `${from}..HEAD`]);
     if (log) console.log('- Commits since then (newest first, at most 30):\n' + log.split('\n').map(l => '    ' + l).join('\n'));
     const stat = git(dir, ['diff', '--stat=120', '--stat-count=25', from, 'HEAD']);
+    if (stat) console.log('- Files changed since then:\n' + stat.split('\n').map(l => '    ' + l).join('\n'));
+  }
+  process.exit(0);
+}
+
+if (typeof flags.area === 'string') {
+  // node tools/changed.mjs --area <repo> <area>: what changed in one area since its note was written (used by /update-area)
+  const { readAreaList, areaNotesDir } = await import('./lib/areas.mjs');
+  const repo = flags.area, name = positional[0] || '';
+  const dir = path.join(REPOS_DIR, repo);
+  const head = git(dir, ['rev-parse', '--short', 'HEAD']);
+  if (!head) { console.log(`- Repo ${repo} not found in repos/ (or not a Git repo).`); process.exit(0); }
+  console.log(`- Commit: ${head}`);
+  console.log(`- Today: ${today()}`);
+  const areas = readAreaList(repo);
+  const area = areas.find(a => a.name === name);
+  if (!area) {
+    console.log(`- Area "${name}" not found. The areas of ${repo} are: ${areas.map(a => a.name).join(', ') || '(none yet: run tools/refresh.mjs)'}. Stop and tell the user.`);
+    process.exit(0);
+  }
+  console.log(`- The area covers: ${area.covers} (${area.files} main files)`);
+  const note = readText(path.join(areaNotesDir(repo), `${name}.md`));
+  const from = (note.match(/^-\s*From commit:\s*([0-9a-f]{6,40})/m) || [])[1];
+  if (!note) console.log('- There is no note yet: write a new one.');
+  else if (!from) console.log('- The note does not say which commit it was written from.');
+  else {
+    const log = git(dir, ['log', '--oneline', '--no-merges', '-30', `${from}..HEAD`, '--', ...area.pathspecs]);
+    console.log(`- The note was written from commit ${from}.`);
+    console.log(log ? '- Commits in this area since then (newest first, at most 30):\n' + log.split('\n').map(l => '    ' + l).join('\n') : '- No commits in this area since then.');
+    const stat = git(dir, ['diff', '--stat=120', '--stat-count=25', from, 'HEAD', '--', ...area.pathspecs]);
     if (stat) console.log('- Files changed since then:\n' + stat.split('\n').map(l => '    ' + l).join('\n'));
   }
   process.exit(0);

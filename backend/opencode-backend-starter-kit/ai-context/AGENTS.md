@@ -1,6 +1,6 @@
 # Backend workspace
 
-This folder is the **ai-context** repo. The backend's Git repos are cloned into `repos/` (this repo's Git ignores them). Each of them is its own Git repository. Most have one Gradle build at the top; some have several separate builds in subfolders, and the card says which folder each one is run from. Everything an AI needs to find its way lives here: the map, one card per repo, shared conventions, and a code index.
+This folder is the **ai-context** repo. The backend's Git repos are cloned into `repos/` (this repo's Git ignores them). Each of them is its own Git repository. Most have one Gradle build at the top; some have several separate builds in subfolders, and the card says which folder each one is run from. Everything an AI needs to find its way lives here: the map, one card per repo, deeper notes per area of a repo, shared conventions, and a code index.
 
 ## Find your way first
 
@@ -8,16 +8,17 @@ Do this before you plan, answer a question about the code, or change anything.
 
 1. `context/REPOS.md` (already in your context) lists every repo: its purpose, "go here for", what it uses and what uses it. Pick the repos the task needs from it.
 2. Before working in a repo, read its card: `context/cards/<repo>.md`, unless it is already in your context. The card has the repo's conventions and its exact build and test commands.
-3. Find code through the index, not by opening files one by one. It covers all repos and answers in under a second:
+3. Before planning or changing code in a repo, open `context/areas/<repo>/README.md`, pick the areas your task touches, and read their notes (`context/areas/<repo>/<area>.md`): main flows, business rules, data and integrations. If an area has no note yet, read its facts instead (`generated/areas/<repo>/<area>.md`): entry points, reading order, tables, queues, configuration keys and rule hints, counted by scripts.
+4. Find code through the index, not by opening files one by one. It covers all repos and answers in under a second:
    - `node tools/find.mjs <ClassName>`: where a class, interface, enum or record is defined. Partial names and capitals work: `OrdSerImpl`.
    - `node tools/find.mjs users <ClassName>`: every file that uses it, grouped by repo.
    - `node tools/find.mjs subtypes <ClassName>`: what extends or implements it (`--deep` for all levels).
    - `node tools/find.mjs method <name> [ClassName]`: methods by name (`place*` for a prefix).
    - `node tools/find.mjs annotated <Annotation> [text]`: for example endpoints (`annotated Path /orders`), entities, listeners, scheduled jobs. Write the annotation without `@`: in PowerShell `@` means something else.
    - Put options at the end: `--repo <name>` keeps results to one repo, `--tests` includes test code.
-4. For text (string literals, SQL, property keys, log messages) use the Grep tool, with `path` set to `repos/<repo>` and `include` set to `*.java` or the file type you need.
-5. Read files over about 500 lines in parts, with offset and limit. Never read anything in `build/`, `out/` or `.gradle/` folders.
-6. For broad questions such as "where is X handled across the repos?", delegate to the `scout` subagent. It searches in its own context and returns only the locations, which keeps this session small.
+5. For text (string literals, SQL, property keys, log messages) use the Grep tool, with `path` set to `repos/<repo>` and `include` set to `*.java` or the file type you need.
+6. Read files over about 500 lines in parts, with offset and limit. Never read anything in `build/`, `out/` or `.gradle/` folders.
+7. For broad questions such as "where is X handled across the repos?", delegate to the `scout` subagent. It searches in its own context and returns only the locations, which keeps this session small.
 
 The facts behind the cards are in `generated/facts/<repo>.md`. The dependency details, including which version of each internal jar every repo uses, are in `context/DEPENDENCIES.md`. If find.mjs says the index is old, tell me; do not run `tools/refresh.mjs` yourself unless I ask, because it takes minutes.
 
@@ -43,4 +44,5 @@ The facts behind the cards are in `generated/facts/<repo>.md`. The dependency de
 - Small steps. After each step, run the tests of the repo you changed and report the result.
 - If the request is unclear, or the code contradicts a card, ask one specific question instead of guessing.
 - Plans live in `.opencode/plans/`. When you work from a plan, follow it; if it turns out to be wrong, stop and say so.
-- If you notice that a card is wrong or misses something important, say so at the end of your reply, with the fix in one line.
+- Respect the business rules in the area notes. If a change would break one, stop and ask.
+- If you notice that a card or an area note is wrong or misses something important, say so at the end of your reply, with the fix in one line.

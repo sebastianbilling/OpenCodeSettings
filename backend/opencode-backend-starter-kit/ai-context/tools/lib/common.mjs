@@ -33,7 +33,7 @@ const SWITCHES = new Set(['tests', 'deep', 'missing', 'all', 'daemon', 'skip-gra
   'on', 'off', 'status', 'pull', 'write-list', 'help']);
 // Options that always take the next word as their value, even if it starts with "--" (e.g. --gradle-args "--offline").
 const VALUES = new Set(['gradle-args', 'only', 'model', 'repo', 'limit', 'parallel', 'variant', 'timeout', 'bakeoff',
-  'stale', 'card', 'gradle-timeout']);
+  'stale', 'card', 'gradle-timeout', 'area']);
 
 /** --flag value / --flag=value / --switch / positional arguments. */
 export function parseArgs(argv = process.argv.slice(2)) {

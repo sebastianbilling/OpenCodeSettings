@@ -15,16 +15,19 @@ ai-context\                     becomes your new Git repo; start OpenCode in thi
     CONVENTIONS.md              shared conventions (drafted by AI, reviewed by you, always loaded)
     GLOSSARY.md                 business terms (drafted by AI, reviewed by you, always loaded)
     card-template.md            the shape of every repo card
+    area-template.md            the shape of every area note
     cards\                      one card per repo (written by the cartographer agent)
+    areas\<repo>\               per repo: README.md (its areas) and one note per area (written by the surveyor agent)
     decisions\                  team decisions that override cards
   .opencode\
-    agents\                     cartographer, scout, planner, reviewer
-    commands\                   /find /plan-feature /implement /check-changes /handoff /update-card /draft-conventions /draft-glossary
+    agents\                     cartographer, surveyor, scout, planner, reviewer
+    commands\                   /find /plan-feature /implement /check-changes /handoff /update-card /update-area /draft-conventions /draft-glossary
     plans\                      plans written by /plan-feature
   tools\
     refresh.mjs                 rebuilds index, dependencies, facts and map (no AI)
     find.mjs                    the AI's search: classes, users, subtypes, methods, annotations
     map-all.mjs                 runs the cartographer over many repos (and model bake-offs)
+    map-areas.mjs               runs the surveyor over the areas of one or more repos
     clone-all.mjs               clones and updates the repos from repos.json
     changed.mjs                 lists uncommitted changes in all repos
     sync-cards.mjs              optional: private copies of the cards inside the repos

@@ -19,6 +19,7 @@ import { CARDS, GENERATED, REPOS_DIR, ROOT, TOOLS, git, listRepos, parseArgs, re
 import { collectDeps, depsFile } from './lib/deps.mjs';
 import { buildGraph, writeDependencies, writeRepoMap } from './lib/map.mjs';
 import { writeFacts, writeOverview } from './lib/facts.mjs';
+import { loadIndex, computeAreas, writeAreaFacts, writeAreaIndex, readAreaList, areaStaleness, areaNotesDir } from './lib/areas.mjs';
 import { syncCards, cardsInReposEnabled } from './lib/cards.mjs';
 
 const { flags } = parseArgs();
@@ -92,6 +93,20 @@ const g = buildGraph(all);
 for (const r of only) writeFacts(r, g);
 writeOverview(g);
 
+// Areas: each repo split into modules or package groups, with facts per area.
+const idx = loadIndex();
+if (idx) {
+  const areasByRepo = {}, areaOfFile = new Map();
+  for (const r of all) {
+    areasByRepo[r] = computeAreas(r, idx, g.deps[r]);
+    for (const a of areasByRepo[r]) for (const f of a.files) areaOfFile.set(r + '\t' + f.file, r + '\t' + a.name);
+  }
+  for (const r of only) writeAreaFacts(r, areasByRepo[r], idx, areaOfFile);
+  for (const r of all) writeAreaIndex(r);
+  const n = only.reduce((s, r) => s + areasByRepo[r].length, 0);
+  console.log(`    ${n} areas in ${only.length} repo(s); facts per area in generated/areas/.`);
+}
+
 // 4. Map and dependency overview --------------------------------------------------
 console.log('4/4 Writing context/REPOS.md and context/DEPENDENCIES.md...');
 writeDependencies(g);
@@ -112,9 +127,19 @@ for (const r of all) {
   const n = Number(git(path.join(REPOS_DIR, r), ['rev-list', '--count', `${from}..HEAD`]) || 0);
   if (n >= staleAfter) stale.push(`${r} (${n} commits since the card was written)`);
 }
+const staleAreas = [];
+for (const r of all) {
+  for (const a of readAreaList(r)) {
+    const note = readText(path.join(areaNotesDir(r), `${a.name}.md`));
+    if (!note) continue;
+    const n = areaStaleness(r, a, note);
+    if (n !== null && n >= Math.max(5, Math.round(staleAfter / 3))) staleAreas.push(`${r}/${a.name} (${n} commits)`);
+  }
+}
 const secs = Math.round((Date.now() - started) / 1000);
 console.log(`\nDone in ${secs}s.`);
 if (noWrapper.length) console.log(`No Gradle wrapper (gradlew.bat) found for some builds, so their build files were read as text: ${noWrapper.join(', ')}`);
 if (gradleFailed.length) console.log(`Gradle could not run for: ${gradleFailed.join(', ')}. Their build files were read as text instead.\n  To retry with another JDK: set $env:JAVA_HOME, then node tools/refresh.mjs --only ${gradleFailed.join(',')} --gradle-all`);
 if (missing.length) console.log(`Repos without a card (${missing.length}): ${missing.join(', ')}`);
 if (stale.length) console.log(`Cards that may be out of date: ${stale.join(', ')}\n  Update one with /update-card <repo> in OpenCode.`);
+if (staleAreas.length) console.log(`Area notes that may be out of date: ${staleAreas.join(', ')}\n  Update one with /update-area <repo> <area> in OpenCode.`);

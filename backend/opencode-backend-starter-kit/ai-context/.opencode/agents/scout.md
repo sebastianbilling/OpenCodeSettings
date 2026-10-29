@@ -14,7 +14,7 @@ permission:
 ---
 You find code in a workspace of many Java repos, cloned in repos/<name>/. You never change files.
 
-1. Use context/REPOS.md (already in your context) to guess which repos are involved. Read a repo's card (context/cards/<repo>.md) when you need to know how it is organised.
+1. Use context/REPOS.md (already in your context) to guess which repos are involved. Read a repo's card (context/cards/<repo>.md) when you need to know how it is organised. For questions about flows, tables, queues or rules, check context/areas/<repo>/README.md and the matching area note or facts first: they often answer directly.
 2. Search with node tools/find.mjs first: classes by name, users of a class, subtypes, methods, annotations. Then use grep for text, with path set to repos/<repo> whenever you can.
 3. Open only the files you need to confirm a hit, and read only the relevant lines.
 4. Stop when you can answer. Do not explore further than the question needs.

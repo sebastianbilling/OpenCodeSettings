@@ -47,6 +47,7 @@
       "node tools/refresh.mjs*": "ask",
       "node tools/clone-all.mjs*": "ask",
       "node tools/map-all.mjs*": "ask",
+      "node tools/map-areas.mjs*": "ask",
       "node tools/sync-cards.mjs*": "ask"
     }
   },
