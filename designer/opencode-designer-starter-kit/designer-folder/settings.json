@@ -1,0 +1,14 @@
+{
+  "appName": "the app",
+  "devCommand": "npm run dev",
+  "installCommand": "npm ci",
+  "appUrl": "http://localhost:5173",
+  "openBrowser": true,
+  "checkCommand": "",
+  "startTimeoutSeconds": 180,
+  "dependencyFiles": ["package.json", "package-lock.json"],
+  "mainBranch": "",
+  "remote": "origin",
+  "safetyCopyFolder": "",
+  "helperName": "Sebastian"
+}

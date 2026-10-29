@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Designer cheat sheet</title>
+<style>
+  :root {
+    --ink: #1d232a;
+    --muted: #5b6672;
+    --line: #d9dee3;
+    --soft: #f3f5f7;
+    --accent: #2457c5;
+    --accent-soft: #e8eefb;
+  }
+  * { box-sizing: border-box; }
+  html { background: #fff; }
+  body {
+    margin: 0 auto; max-width: 820px; padding: 32px 28px 40px;
+    font: 15px/1.5 "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+    color: var(--ink); background: #fff;
+  }
+  h1 { font-size: 26px; line-height: 1.2; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 22px; }
+  h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent);
+    margin: 26px 0 10px; padding-bottom: 6px; border-bottom: 2px solid var(--accent-soft);
+  }
+  ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: s; display: grid; gap: 10px; }
+  ol.steps li { counter-increment: s; display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: start; }
+  ol.steps li::before {
+    content: counter(s); width: 26px; height: 26px; border-radius: 50%;
+    background: var(--accent); color: #fff; font-weight: 600; font-size: 13px;
+    display: grid; place-items: center; margin-top: 1px;
+  }
+  .words { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .word { background: var(--soft); border-radius: 8px; padding: 10px 12px; }
+  .word b { display: block; font-size: 15px; }
+  .word span { color: var(--muted); font-size: 13px; line-height: 1.4; display: block; margin-top: 2px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td:first-child { font-weight: 600; width: 30%; }
+  code {
+    font: 13px/1.3 Consolas, "Cascadia Mono", Menlo, monospace; background: var(--accent-soft);
+    color: #183f94; padding: 2px 6px; border-radius: 4px; white-space: nowrap;
+  }
+  td.say { color: var(--muted); font-style: italic; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  ul.tight { margin: 0; padding-left: 18px; }
+  ul.tight li { margin: 0 0 6px; }
+  .note { background: var(--accent-soft); border-radius: 8px; padding: 12px 14px; margin-top: 18px; }
+  .page-break { break-before: page; }
+  @media (max-width: 640px) {
+    body { padding: 20px 16px; }
+    .words { grid-template-columns: 1fr 1fr; }
+    .two { grid-template-columns: 1fr; }
+    td:first-child { width: auto; }
+    code { white-space: normal; }
+  }
+  @media print {
+    body { padding: 0; max-width: none; font-size: 11.5px; line-height: 1.42; }
+    h1 { font-size: 21px; }
+    .sub { margin-bottom: 12px; }
+    h2 { margin: 14px 0 7px; padding-bottom: 4px; }
+    ol.steps { gap: 6px; }
+    td { padding: 4px 8px; }
+    th { padding: 4px 8px; }
+    code { font-size: 11px; }
+    .word { padding: 8px 10px; }
+    .two { break-inside: avoid; }
+    @page { size: A4; margin: 14mm 14mm 12mm; }
+  }
+</style>
+</head>
+<body>
+  <h1>Designing with the AI</h1>
+  <p class="sub">Your cheat sheet for trying ideas in the real app. Nothing you do here reaches the team's code, and nothing is lost.</p>
+
+  <h2>Every day</h2>
+  <ol class="steps">
+    <li><div><b>Double-click "Start app" on your desktop.</b> A black window opens and the app appears in your browser. Leave the black window open while you work; closing it stops the app.</div></li>
+    <li><div><b>Open OpenCode</b> and pick the project. Every chat starts with your design partner, the AI.</div></li>
+    <li><div><b>Describe what you want to see.</b> The AI changes the app and tells you which page to look at. The browser updates by itself; press F5 if it doesn't.</div></li>
+    <li><div><b>Like it? Save it.</b> Type <code>/save-version</code> or just say "save this". Saved versions can always be opened again.</div></li>
+  </ol>
+
+  <h2>Four words to know</h2>
+  <div class="words">
+    <div class="word"><b>Idea</b><span>A design direction you work on, like "new checkout".</span></div>
+    <div class="word"><b>Version</b><span>A saved moment of an idea: version 1, 2, 3 and so on.</span></div>
+    <div class="word"><b>Unsaved changes</b><span>Everything changed since the version you have open.</span></div>
+    <div class="word"><b>The team's code</b><span>The developers' newest app, without your ideas.</span></div>
+  </div>
+
+  <h2>What to type</h2>
+  <p style="margin:0 0 8px;color:var(--muted)">Type <code>/</code> in OpenCode to see every command. You can always just ask in your own words instead.</p>
+  <table>
+    <thead><tr><th>You want to</th><th>Type</th><th>Or say</th></tr></thead>
+    <tbody>
+      <tr><td>Save what you see</td><td><code>/save-version Bigger buttons</code></td><td class="say">"Save this as bigger buttons"</td></tr>
+      <tr><td>See your ideas and versions</td><td><code>/versions</code></td><td class="say">"Show my versions"</td></tr>
+      <tr><td>Open a saved version</td><td><code>/open-version checkout 2</code></td><td class="say">"Go back to the one with the blue header"</td></tr>
+      <tr><td>Start a new idea</td><td><code>/new-idea</code></td><td class="say">"Start a new idea for the settings page"</td></tr>
+      <tr><td>Get the team's newest code</td><td><code>/get-latest</code></td><td class="say">"Get the latest from the team"</td></tr>
+      <tr><td>Bring that into your idea</td><td><code>/update-idea</code></td><td class="say">"Update my idea with the team's changes"</td></tr>
+      <tr><td>Take back the AI's last design change</td><td><code>/undo</code></td><td class="say">"Undo your last change"</td></tr>
+      <tr><td>Throw away unsaved changes</td><td><code>/discard-changes</code></td><td class="say">"Go back to my last saved version"</td></tr>
+      <tr><td>Check where you are</td><td><code>/where-am-i</code></td><td class="say">"Which version am I on?"</td></tr>
+      <tr><td>See the app without your ideas</td><td><code>/team-code</code></td><td class="say">"Show me the app as the team has it"</td></tr>
+      <tr><td>Start or restart the app</td><td><code>/start-app</code></td><td class="say">"The app isn't showing"</td></tr>
+      <tr><td>Something looks wrong or lost</td><td><code>/fix-problems</code></td><td class="say">"Something is broken, help"</td></tr>
+      <tr><td>See what you can ask</td><td><code>/help-me</code></td><td class="say">"What can you do?"</td></tr>
+    </tbody>
+  </table>
+
+  <div class="two">
+    <div>
+      <h2>Getting good results</h2>
+      <ul class="tight">
+        <li><b>Be specific.</b> Say where, what and how much: "On the order page, make the Buy button 48 px tall, colour #1A73E8, with 16 px space above it."</li>
+        <li><b>One change at a time.</b> Small steps are easier to judge and to undo.</li>
+        <li><b>Point at what exists.</b> "Use the same card style as on the dashboard."</li>
+        <li><b>The AI can't see pictures.</b> Describe a mockup in words: layout from top to bottom, sizes, colours as hex codes, fonts.</li>
+        <li><b>One chat per idea.</b> Start a new chat (New session, or <code>/new</code>) when you switch ideas or when answers get slow.</li>
+        <li><b>Save when you like something,</b> even small steps. Versions cost nothing.</li>
+      </ul>
+    </div>
+    <div>
+      <h2>Good to know</h2>
+      <ul class="tight">
+        <li><b>Nothing is lost.</b> Before anything is thrown away, the AI keeps a backup. Ask "find what I threw away yesterday" and it can bring it back.</li>
+        <li><b>Your versions stay on this computer.</b> They are never sent to the team. To show a concept, invite a developer to your screen; the AI can write a short summary of what changed.</li>
+        <li><b>Old versions stay the same.</b> Getting the team's newest code never changes them.</li>
+        <li><b>/undo is for design changes only.</b> Use it right after a change you don't like, not after saving, opening a version or getting the latest.</li>
+        <li><b>When the AI asks you something,</b> it shows buttons. Click the answer that fits, or type your own.</li>
+        <li><b>Stuck?</b> Type <code>/fix-problems</code>. If that doesn't help, ask Sebastian. There is no rush: your work is safe.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note"><b>A typical session:</b> "Start a new idea for a simpler checkout." &rarr; "Put the order summary on the right and make it sticky." &rarr; "Make the total bold and 20 px." &rarr; "Save this." &rarr; next day: "Get the latest from the team and update my idea."</div>
+</body>
+</html>

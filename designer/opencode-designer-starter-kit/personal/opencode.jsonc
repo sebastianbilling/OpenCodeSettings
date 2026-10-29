@@ -1,0 +1,58 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // ------------------------------------------------------------------
+  // Personal config for the DESIGNER's Windows account.
+  // Lives in C:\Users\<designer>\.config\opencode\opencode.jsonc
+  // The top half is the same as your own personal config from the
+  // first setup; copy your real server address and model names.
+  // ------------------------------------------------------------------
+
+  // Offline housekeeping
+  "autoupdate": false,             // never download updates
+  "share": "disabled",             // never create share links
+  "enabled_providers": ["local"],  // only your own model servers
+
+  // Your model servers (same as in your own personal config)
+  "provider": {
+    "local": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Local AI servers",
+      "options": {
+        "baseURL": "<LLM_URL>",
+        "apiKey": "{env:LLM_API_KEY}",
+        "timeout": 600000
+      },
+      "models": {
+        "<GLM_ID>": {
+          "name": "GLM 5.3 Flash",
+          "tool_call": true,
+          "limit": { "context": 262144, "output": 32768 }
+        },
+        "<MINIMAX_ID>": {
+          "name": "MiniMax 2.5",
+          "tool_call": true,
+          "limit": { "context": 262144, "output": 32768 }
+        }
+      }
+    }
+  },
+
+  "model": "local/<GLM_ID>",
+  "small_model": "local/<GLM_ID>",
+
+  // ------------------------------------------------------------------
+  // Designer setup
+  // ------------------------------------------------------------------
+
+  // Every new chat starts with the designer agent (agents\designer.md).
+  "default_agent": "designer",
+
+  // The developers' agents stay available to commands but are hidden
+  // from the agent picker, so he cannot switch to them by accident.
+  "agent": {
+    "build":   { "hidden": true },
+    "plan":    { "hidden": true },
+    "planner": { "hidden": true }
+  }
+}
