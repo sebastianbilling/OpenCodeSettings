@@ -1,17 +1,18 @@
 #!/usr/bin/env node
 // setup.mjs - one-time setup of the designer's computer. Run it while logged in as the DESIGNER.
 //
-//   node setup.mjs <project folder> [--name "First Last"] [--email name@company] [--no-shortcut] [--skip-personal]
+//   node setup.mjs <project folder> [--name "First Last"] [--email name@company] [--skip-personal]
 //   node setup.mjs <project folder> --check        only check, change nothing
 //
-// What it does (it can be run again safely; it never deletes anything):
-//   1. copies designer-folder\ into <project>\.designer\  (settings.json is kept if it already exists)
+// What it does (it can be run again safely; it never deletes the designer's work):
+//   1. copies designer-folder\ into <project>\.designer\  (an existing settings.json is kept; settings that
+//      are new in this kit are added to it with their default values)
 //   2. hides .designer\ from Git on this computer only (.git\info\exclude)
 //   3. turns off pushing for this project copy (push address, push default, pre-push hook)
 //   4. sets the name Git records for the designer's saves (if --name/--email given or nothing is set)
 //   5. copies the designer agent and commands into C:\Users\<designer>\.config\opencode\
 //      (opencode.jsonc is only copied if none exists; otherwise you add the designer lines by hand)
-//   6. puts a "Start app" shortcut on the Windows desktop
+//   6. removes "Start app.cmd" and its desktop shortcut, left over from the first kit (the AI starts the app now)
 //   7. runs the checks and shows where the project stands
 
 import { spawnSync } from "node:child_process"
@@ -73,8 +74,41 @@ const HOME_CFG = path.join(os.homedir(), ".config", "opencode")
 
 // ---------------------------------------------------------------- 1. .designer folder
 const src = path.join(KIT, "designer-folder")
+
+/** Keep the user's values, add settings that are new in this kit, drop ones that no longer exist. */
+function updateSettings(file, kitFile) {
+  let cur
+  try {
+    cur = JSON.parse(fs.readFileSync(file, "utf8").replace(/^﻿/, ""))
+  } catch (e) {
+    bad(`.designer\\settings.json is not valid JSON (${e.message}). Fix it by hand; in folder paths write / or \\\\ instead of a single \\.`)
+    return []
+  }
+  const kit = JSON.parse(fs.readFileSync(kitFile, "utf8"))
+  const changed = []
+  if (!("prepareCommands" in cur)) {
+    const old = typeof cur.installCommand === "string" ? cur.installCommand.trim() : ""
+    // the first kit's defaults ("npm ci" / "npm install") become the new default chain; a custom command is kept
+    cur.prepareCommands = !old || old === "npm ci" || old === "npm install" ? kit.prepareCommands : [old, ...kit.prepareCommands.slice(1)]
+    changed.push(`prepareCommands is now ${JSON.stringify(cur.prepareCommands)}`)
+  }
+  const GONE = ["installCommand", "openBrowser", "appUrl"] // not used any more (the app is an Electron app with its own window)
+  for (const gone of GONE) if (gone in cur) changed.push(`removed ${gone}`)
+  const next = {}
+  for (const k of Object.keys(kit)) {
+    if (k in cur) next[k] = cur[k]
+    else {
+      next[k] = kit[k]
+      if (k !== "prepareCommands") changed.push(`added ${k}`)
+    }
+  }
+  for (const k of Object.keys(cur)) if (!(k in next) && !GONE.includes(k)) next[k] = cur[k]
+  if (changed.length) fs.writeFileSync(file, JSON.stringify(next, null, 2) + "\n")
+  return changed
+}
+
 if (CHECK) {
-  for (const f of ["versions.mjs", "app.mjs", "settings.json", "Start app.cmd"]) {
+  for (const f of ["versions.mjs", "app.mjs", "settings.json"]) {
     if (fs.existsSync(path.join(DEST, f))) ok(`.designer\\${f} is in place`)
     else bad(`.designer\\${f} is missing (run setup without --check)`)
   }
@@ -83,12 +117,19 @@ if (CHECK) {
     const b = path.join(DEST, f)
     if (fs.existsSync(a) && fs.existsSync(b) && fs.readFileSync(a, "utf8") !== fs.readFileSync(b, "utf8")) bad(`.designer\\${f} differs from the kit (run setup again to update it)`)
   }
+  try {
+    const s = JSON.parse(fs.readFileSync(path.join(DEST, "settings.json"), "utf8").replace(/^﻿/, ""))
+    if (Array.isArray(s.prepareCommands)) ok(`Starting the app runs ${JSON.stringify(s.prepareCommands)} when needed, then ${JSON.stringify(s.devCommand || "npm run dev")}`)
+    else bad(".designer\\settings.json has no prepareCommands yet (run setup without --check to add it)")
+  } catch {}
+  if (fs.existsSync(path.join(DEST, "Start app.cmd"))) bad(".designer\\Start app.cmd from the first kit is still there (run setup without --check to remove it)")
 } else {
   fs.mkdirSync(DEST, { recursive: true })
   for (const f of fs.readdirSync(src)) {
     const to = path.join(DEST, f)
     if (f === "settings.json" && fs.existsSync(to)) {
-      info(".designer\\settings.json already exists: kept as it is")
+      const changed = updateSettings(to, path.join(src, f))
+      info(changed.length ? `.designer\\settings.json kept, with these updates: ${changed.join("; ")}` : ".designer\\settings.json already exists: kept as it is")
       continue
     }
     fs.copyFileSync(path.join(src, f), to)
@@ -161,13 +202,19 @@ if (!flag("--skip-personal")) {
   }
 }
 
-// ---------------------------------------------------------------- 6. desktop shortcut
-if (WIN && !CHECK && !flag("--no-shortcut")) {
-  const target = path.join(DEST, "Start app.cmd")
-  const ps = `$d=[Environment]::GetFolderPath('Desktop'); $s=(New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $d 'Start app.lnk')); $s.TargetPath='${target.replace(/'/g, "''")}'; $s.WorkingDirectory='${PROJECT.replace(/'/g, "''")}'; $s.Description='Start the app for design work'; $s.Save()`
-  const r = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { encoding: "utf8", windowsHide: true })
-  if (r.status === 0) ok('Put a "Start app" shortcut on the desktop')
-  else info('Could not create the desktop shortcut. Right-click .designer\\Start app.cmd > Show more options > Send to > Desktop (create shortcut).')
+// ---------------------------------------------------------------- 6. leftovers from the first kit
+if (!CHECK) {
+  const oldCmd = path.join(DEST, "Start app.cmd")
+  if (fs.existsSync(oldCmd)) {
+    fs.rmSync(oldCmd, { force: true })
+    ok('Removed .designer\\Start app.cmd from the first kit (the AI starts the app now)')
+  }
+  if (WIN) {
+    // Only the shortcut the first kit made: named "Start app" and pointing at .designer\Start app.cmd
+    const ps = `$l = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Start app.lnk'; if (Test-Path $l) { $t = (New-Object -ComObject WScript.Shell).CreateShortcut($l).TargetPath; if ($t -like '*\\.designer\\Start app.cmd') { Remove-Item $l; 'removed' } }`
+    const r = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { encoding: "utf8", windowsHide: true })
+    if ((r.stdout || "").includes("removed")) ok('Removed the old "Start app" shortcut from the desktop')
+  }
 }
 
 // ---------------------------------------------------------------- 7. tools work?

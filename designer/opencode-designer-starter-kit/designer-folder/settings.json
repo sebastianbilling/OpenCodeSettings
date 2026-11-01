@@ -1,9 +1,8 @@
 {
   "appName": "the app",
+  "prepareCommands": ["npm install", "npm run build:dev"],
   "devCommand": "npm run dev",
-  "installCommand": "npm ci",
-  "appUrl": "http://localhost:5173",
-  "openBrowser": true,
+  "readyText": "",
   "checkCommand": "",
   "startTimeoutSeconds": 180,
   "dependencyFiles": ["package.json", "package-lock.json"],
